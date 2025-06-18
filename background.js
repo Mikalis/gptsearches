@@ -1,6 +1,9 @@
 // ChatGPT Analyst - Background Script
 console.log("[ChatGPT Analyst] Background script loaded");
 
+// Store active debugger sessions
+const activeDebuggers = new Set();
+
 // Extract conversation ID from URL
 function extractConversationId(url) {
   if (!url) return null;
@@ -25,11 +28,23 @@ function extractConversationId(url) {
   return null;
 }
 
+// Listen for tab updates to start intercepting
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Only monitor ChatGPT tabs
+  if (!tab.url || !tab.url.includes('chatgpt.com')) return;
+  
+  // When a ChatGPT tab starts loading, set up network interception
+  if (changeInfo.status === 'loading') {
+    const conversationId = extractConversationId(tab.url);
+    if (conversationId) {
+      console.log('[ChatGPT Analyst] 🔄 Tab loading ChatGPT conversation:', conversationId);
+      setupNetworkInterception(tabId, conversationId);
+    }
+  }
+});
+
 // Listen for messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Always return false for asynchronous operations
-  // This prevents "message channel closed" errors
-  
   if (request.action === "analyzeConversation") {
     const tabId = sender.tab.id;
     const manual = request.manual || false;
@@ -40,8 +55,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const conversationId = extractConversationId(url);
       
       if (conversationId) {
-        console.log('[ChatGPT Analyst] 🔍 Analyzing conversation:', conversationId);
-        captureConversationData(tabId, manual);
+        console.log('[ChatGPT Analyst] 🔍 Manual analysis requested for:', conversationId);
+        setupNetworkInterception(tabId, conversationId);
       } else {
         console.log('[ChatGPT Analyst] ⚠️ No conversation ID found in URL:', url);
         chrome.tabs.sendMessage(tabId, {
@@ -52,218 +67,154 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   }
   
-  // Return false to indicate we're not using sendResponse() synchronously
   return false;
 });
 
-function captureConversationData(tabId, manual = false) {
-  console.log('[ChatGPT Analyst] 🔍 Setting up debugger for tab:', tabId);
+function setupNetworkInterception(tabId, conversationId) {
+  // Avoid duplicate debugger attachments
+  const debuggerKey = `${tabId}-${conversationId}`;
+  if (activeDebuggers.has(debuggerKey)) {
+    console.log('[ChatGPT Analyst] Already intercepting for tab:', tabId);
+    return;
+  }
   
-  // Get conversation ID from URL
-  chrome.tabs.get(tabId, (tab) => {
-    const url = tab.url;
-    const conversationId = extractConversationId(url);
+  console.log('[ChatGPT Analyst] 🕳️ Setting up network interception for:', conversationId);
+  
+  // Check if debugger is already attached
+  chrome.debugger.getTargets((targets) => {
+    const alreadyAttached = targets.some(target => 
+      target.tabId === tabId && target.attached);
     
-    if (!conversationId) {
-      console.log('[ChatGPT Analyst] ⚠️ No conversation ID found in URL:', url);
-      chrome.tabs.sendMessage(tabId, {
-        action: 'debuggerError',
-        error: 'No conversation ID found in URL. Please make sure you are on a ChatGPT conversation page.'
-      });
+    if (alreadyAttached) {
+      console.log('[ChatGPT Analyst] Debugger already attached to tab:', tabId);
       return;
     }
     
-    console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
-    
-    // Check if we're already attached to this tab
-    chrome.debugger.getTargets((targets) => {
-      const alreadyAttached = targets.some(target => 
-        target.tabId === tabId && target.attached);
-      
-      if (alreadyAttached) {
-        console.log('[ChatGPT Analyst] Already attached to tab:', tabId);
-        // Try to trigger the network request directly
-        triggerConversationRequest(tabId, conversationId);
+    // Attach debugger
+    chrome.debugger.attach({tabId}, '1.3', () => {
+      if (chrome.runtime.lastError) {
+        console.error('[ChatGPT Analyst] Error attaching debugger:', chrome.runtime.lastError);
         return;
       }
       
-      // Attach debugger to tab
-      chrome.debugger.attach({tabId}, '1.3', () => {
+      console.log('[ChatGPT Analyst] ✅ Debugger attached to tab:', tabId);
+      activeDebuggers.add(debuggerKey);
+      
+      // Enable Network domain
+      chrome.debugger.sendCommand({tabId}, 'Network.enable', {}, () => {
         if (chrome.runtime.lastError) {
-          console.error('[ChatGPT Analyst] Error attaching debugger:', chrome.runtime.lastError);
-          chrome.tabs.sendMessage(tabId, {
-            action: 'debuggerError',
-            error: `Error attaching debugger: ${chrome.runtime.lastError.message}`
-          });
+          console.error('[ChatGPT Analyst] Error enabling Network domain:', chrome.runtime.lastError);
+          chrome.debugger.detach({tabId});
+          activeDebuggers.delete(debuggerKey);
           return;
         }
         
-        console.log('[ChatGPT Analyst] Debugger attached to tab:', tabId);
+        console.log('[ChatGPT Analyst] 🌐 Network domain enabled, intercepting requests...');
         
-        // Enable Network domain
-        chrome.debugger.sendCommand({tabId}, 'Network.enable', {}, () => {
-          if (chrome.runtime.lastError) {
-            console.error('[ChatGPT Analyst] Error enabling Network domain:', chrome.runtime.lastError);
-            chrome.debugger.detach({tabId});
-            chrome.tabs.sendMessage(tabId, {
-              action: 'debuggerError',
-              error: `Error enabling Network domain: ${chrome.runtime.lastError.message}`
-            });
-            return;
+        // Set up the network listener
+        const onNetworkEvent = (debuggeeId, message, params) => {
+          if (debuggeeId.tabId !== tabId) return;
+          
+          if (message === 'Network.responseReceived') {
+            const {requestId, response} = params;
+            const url = response.url;
+            
+            // Check if this is the conversation API request we want
+            if (url.includes(`/backend-api/conversation/${conversationId}`) && 
+                !url.includes('/textdocs') && 
+                !url.includes('/attachments') &&
+                response.status === 200) {
+              
+              console.log('[ChatGPT Analyst] 🎯 INTERCEPTED conversation API request:', url);
+              
+              // Get the response body
+              chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
+                if (chrome.runtime.lastError) {
+                  console.warn('[ChatGPT Analyst] Error getting response body:', chrome.runtime.lastError.message);
+                  return;
+                }
+                
+                try {
+                  let body = bodyResult.body;
+                  if (bodyResult.base64Encoded) {
+                    body = atob(body);
+                  }
+                  
+                  const jsonData = JSON.parse(body);
+                  console.log('[ChatGPT Analyst] ✅ Successfully intercepted and parsed JSON:', {
+                    url: url,
+                    status: response.status,
+                    hasMapping: !!jsonData.mapping,
+                    title: jsonData.title || 'Untitled',
+                    dataSize: body.length
+                  });
+                  
+                  // Send the intercepted data to content script
+                  chrome.tabs.sendMessage(tabId, {
+                    action: 'networkData',
+                    source: 'network_interception',
+                    url: url,
+                    conversationId: conversationId,
+                    timestamp: Date.now(),
+                    data: jsonData
+                  });
+                  
+                  // Clean up after successful interception
+                  chrome.debugger.onEvent.removeListener(onNetworkEvent);
+                  chrome.debugger.detach({tabId}, () => {
+                    activeDebuggers.delete(debuggerKey);
+                    console.log('[ChatGPT Analyst] 🎉 Network interception successful, debugger detached');
+                  });
+                  
+                } catch (e) {
+                  console.error('[ChatGPT Analyst] Error parsing intercepted JSON:', e);
+                  chrome.tabs.sendMessage(tabId, {
+                    action: 'debuggerError',
+                    error: `Error parsing response: ${e.message}`
+                  });
+                }
+              });
+            }
           }
-          
-          console.log('[ChatGPT Analyst] Network domain enabled for tab:', tabId);
-          
-          // Set up network listener before making the request
-          setupNetworkListener(tabId, conversationId);
-          
-          // Now trigger the conversation request
-          setTimeout(() => {
-            triggerConversationRequest(tabId, conversationId);
-          }, 500);
-        });
+        };
+        
+        // Start listening for network events
+        chrome.debugger.onEvent.addListener(onNetworkEvent);
+        
+        // Auto-cleanup after timeout
+        setTimeout(() => {
+          if (activeDebuggers.has(debuggerKey)) {
+            console.log('[ChatGPT Analyst] ⏰ Network interception timeout, cleaning up...');
+            chrome.debugger.onEvent.removeListener(onNetworkEvent);
+            chrome.debugger.detach({tabId}, () => {
+              activeDebuggers.delete(debuggerKey);
+            });
+          }
+        }, 60000); // 60 second timeout
       });
     });
   });
 }
 
-function setupNetworkListener(tabId, conversationId) {
-  // Listen for debugger events
-  const onDebuggerEvent = (debuggeeId, message, params) => {
-    if (debuggeeId.tabId !== tabId) return;
-    
-    if (message === 'Network.responseReceived') {
-      const {requestId, response} = params;
-      
-      console.log(`[ChatGPT Analyst] 📡 Response received: ${response.url} (${response.status})`);
-      
-      if (response.url.includes(`/backend-api/conversation/${conversationId}`) && 
-          !response.url.includes('/textdocs') && 
-          !response.url.includes('/attachments') &&
-          response.status === 200) {
-        
-        console.log('[ChatGPT Analyst] 🎯 Found target conversation response:', response.url);
-        
-        // Get response body
-        chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[ChatGPT Analyst] getResponseBody error:', chrome.runtime.lastError.message);
-            return;
-          }
-          
-          try {
-            let body = bodyResult.body;
-            if (bodyResult.base64Encoded) {
-              body = atob(body);
-            }
-            
-            const jsonData = JSON.parse(body);
-            console.log('[ChatGPT Analyst] ✅ Successfully captured conversation JSON:', {
-              url: response.url,
-              status: response.status,
-              hasMapping: !!jsonData.mapping,
-              title: jsonData.title || 'Untitled',
-              dataSize: body.length
-            });
-            
-            // Send to content script
-            chrome.tabs.sendMessage(tabId, {
-              action: 'networkData',
-              source: 'debugger_capture',
-              url: response.url,
-              conversationId: conversationId,
-              timestamp: Date.now(),
-              data: jsonData
-            });
-            
-            // Clean up
-            chrome.debugger.onEvent.removeListener(onDebuggerEvent);
-            chrome.debugger.detach({tabId}, () => {
-              console.log('[ChatGPT Analyst] 🐞 Debugger detached after successful capture');
-            });
-            
-          } catch (e) {
-            console.warn('[ChatGPT Analyst] Error processing response body:', e);
-            chrome.tabs.sendMessage(tabId, {
-              action: 'debuggerError',
-              error: `Error processing response: ${e.message}`
-            });
-          }
-        });
-      }
+// Clean up when tabs are closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  // Remove any active debuggers for this tab
+  for (const debuggerKey of activeDebuggers) {
+    if (debuggerKey.startsWith(`${tabId}-`)) {
+      activeDebuggers.delete(debuggerKey);
+      chrome.debugger.detach({tabId}, () => {
+        console.log('[ChatGPT Analyst] Cleaned up debugger for closed tab:', tabId);
+      });
     }
-  };
-  
-  chrome.debugger.onEvent.addListener(onDebuggerEvent);
-  
-  // Auto-detach after timeout
-  setTimeout(() => {
-    chrome.debugger.getTargets((targets) => {
-      const stillAttached = targets.some(target => 
-        target.tabId === tabId && target.attached);
-      
-      if (stillAttached) {
-        console.log('[ChatGPT Analyst] ⏰ Timeout - detaching debugger');
-        chrome.debugger.onEvent.removeListener(onDebuggerEvent);
-        chrome.debugger.detach({tabId});
-        
-        // Check if we've already sent data before showing error
-        chrome.tabs.sendMessage(tabId, {action: 'checkDataReceived'}, (response) => {
-          // Only show error if we haven't received data yet
-          if (!response || !response.dataReceived) {
-            chrome.tabs.sendMessage(tabId, {
-              action: 'debuggerError',
-              error: 'Timeout waiting for conversation data. Try refreshing the page manually.'
-            });
-          }
-        });
-      }
-    });
-  }, 30000); // Reduced timeout to 30 seconds
-}
-
-function triggerConversationRequest(tabId, conversationId) {
-  console.log('[ChatGPT Analyst] Triggering conversation request for:', conversationId);
-  
-  // Send message to content script to make the API request
-  chrome.tabs.sendMessage(tabId, {
-    action: 'makeApiRequest',
-    conversationId: conversationId,
-    apiUrl: `https://chatgpt.com/backend-api/conversation/${conversationId}`
-  }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error('[ChatGPT Analyst] Error sending makeApiRequest message:', chrome.runtime.lastError);
-    } else {
-      console.log('[ChatGPT Analyst] makeApiRequest message sent successfully:', response);
-    }
-  });
-}
-
-// Listen for tab updates to detach debugger when needed
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // If the tab is loading a new page, detach debugger
-  if (changeInfo.status === 'loading') {
-    chrome.debugger.getTargets((targets) => {
-      const stillAttached = targets.some(target => 
-        target.tabId === tabId && target.attached);
-      
-      if (stillAttached) {
-        console.log('[ChatGPT Analyst] Tab navigating - detaching debugger from tab:', tabId);
-        chrome.debugger.detach({tabId});
-      }
-    });
   }
 });
 
-// Listen for tab close to detach debugger
-chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.debugger.getTargets((targets) => {
-    const stillAttached = targets.some(target => 
-      target.tabId === tabId && target.attached);
-    
-    if (stillAttached) {
-      console.log('[ChatGPT Analyst] Tab closed - detaching debugger from tab:', tabId);
-      chrome.debugger.detach({tabId});
-    }
-  });
+// Clean up when extension is disabled/updated
+chrome.runtime.onSuspend.addListener(() => {
+  console.log('[ChatGPT Analyst] Extension suspending, cleaning up debuggers...');
+  for (const debuggerKey of activeDebuggers) {
+    const tabId = parseInt(debuggerKey.split('-')[0]);
+    chrome.debugger.detach({tabId});
+  }
+  activeDebuggers.clear();
 }); 

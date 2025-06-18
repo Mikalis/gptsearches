@@ -22,7 +22,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   if (message.action === 'networkData') {
     // Process network data captured by debugger
-    console.log('[ChatGPT Analyst] 📊 Received network data from debugger');
+    console.log('[ChatGPT Analyst] 📊 Received intercepted network data');
     processNetworkData(message);
     sendResponse({ success: true });
   } else if (message.action === 'debuggerError') {
@@ -43,22 +43,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[ChatGPT Analyst] Manual analysis requested from popup');
     analyzeConversationWithDebugger(true);
     sendResponse({ success: true });
-  } else if (message.action === 'makeApiRequest') {
-    // Handle API request from background script
-    console.log('[ChatGPT Analyst] Making API request for conversation:', message.conversationId);
-    makeDirectApiRequest(message.apiUrl, message.conversationId)
-      .then(result => {
-        console.log('[ChatGPT Analyst] API request completed:', result);
-        sendResponse({ success: true, result: result });
-      })
-      .catch(error => {
-        console.error('[ChatGPT Analyst] API request failed:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    return true; // Keep response channel open for async response
   }
   
-  return false; // Don't keep the response channel open for other messages
+  return false; // Don't keep the response channel open
 });
 
 // Wait for page to be ready
@@ -263,6 +250,35 @@ function updateOverlayContent(data) {
       <div class="loading-message">
         <h4>🔄 Page Reload in Progress...</h4>
         <p>The page will reload automatically to capture fresh network traffic from ChatGPT.</p>
+      </div>
+    `;
+    return;
+  }
+  
+  if (data.awaitingRefresh) {
+    contentDiv.innerHTML = `
+      <div class="loading-message">
+        <h4>🔍 Network Interception Active</h4>
+        <p>✅ The plugin is now intercepting network requests.</p>
+        <div class="user-guidance">
+          <p><strong>To capture conversation data:</strong></p>
+          <ol>
+            <li><strong>Refresh this page</strong> (F5 or Ctrl+R)</li>
+            <li>The plugin will automatically intercept the conversation request</li>
+            <li>Results will appear here instantly</li>
+          </ol>
+        </div>
+        <div class="solution-steps">
+          <h6>🎯 How it works:</h6>
+          <ul>
+            <li>When you refresh, ChatGPT loads the conversation data</li>
+            <li>The plugin intercepts the JSON response</li>
+            <li>It extracts search queries and internal reasoning</li>
+          </ul>
+        </div>
+        <div class="action-buttons">
+          <button onclick="window.location.reload()" class="primary-btn">🔄 Refresh Page Now</button>
+        </div>
       </div>
     `;
     return;
@@ -598,7 +614,7 @@ function getCurrentConversationId() {
 
 // Analyze conversation with debugger-based approach
 function analyzeConversationWithDebugger(manual = false) {
-  console.log('[ChatGPT Analyst] 🔄 Starting debugger-based analysis...');
+  console.log('[ChatGPT Analyst] 🔄 Starting network interception analysis...');
   console.log('[ChatGPT Analyst] Current URL:', window.location.href);
   
   // Update UI to show loading state
@@ -635,8 +651,8 @@ function analyzeConversationWithDebugger(manual = false) {
     return;
   }
   
-  // Send message to background script to start debugger capture
-  console.log('[ChatGPT Analyst] Sending request to background script...');
+  // Send message to background script to start network interception
+  console.log('[ChatGPT Analyst] Requesting network interception from background script...');
   chrome.runtime.sendMessage({
     action: 'analyzeConversation',
     conversationId: conversationId,
@@ -644,40 +660,15 @@ function analyzeConversationWithDebugger(manual = false) {
   }).then(response => {
     console.log('[ChatGPT Analyst] Background script response:', response);
     
-    // Set a timeout to check if we received data
-    setTimeout(() => {
-      if (!dataReceived) {
-        console.log('[ChatGPT Analyst] No data received yet, checking if page needs refresh...');
-        
-        // Try to make a direct API request to trigger network capture
-        const apiUrl = `https://chatgpt.com/backend-api/conversation/${conversationId}`;
-        fetch(apiUrl, {
-          headers: {
-            'Accept': 'application/json',
-          },
-          credentials: 'include'
-        }).then(response => {
-          console.log('[ChatGPT Analyst] Direct API request made to trigger capture');
-        }).catch(error => {
-          console.log('[ChatGPT Analyst] Direct API request failed, trying page refresh method...');
-          
-          // Show reloading state
-          showAnalysisResult({
-            isReloading: true,
-            hasData: false,
-            searchQueries: [],
-            thoughts: [],
-            reasoning: []
-          });
-          
-          // If direct request fails, reload page as fallback
-          setTimeout(() => {
-            console.log('[ChatGPT Analyst] Refreshing page to capture fresh network traffic...');
-            window.location.reload();
-          }, 1000);
-        });
-      }
-    }, 3000); // Wait 3 seconds for data
+    // Show instructions to user
+    showAnalysisResult({
+      isLoading: false,
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      awaitingRefresh: true
+    });
     
   }).catch(error => {
     console.log('[ChatGPT Analyst] Background script communication error:', error);
@@ -1163,100 +1154,4 @@ function initializeExtension() {
   }
   
   console.log('[ChatGPT Analyst] Extension initialized successfully');
-}
-
-// Make direct API request to fetch conversation data
-async function makeDirectApiRequest(apiUrl, conversationId) {
-  console.log('[ChatGPT Analyst] Making direct API request to:', apiUrl);
-  
-  try {
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      credentials: 'include'
-    });
-    
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new Error('Conversation not found. This conversation may have expired or been deleted.');
-      } else if (response.status === 401) {
-        throw new Error('Authentication required. Please make sure you are logged in to ChatGPT.');
-      } else {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-    }
-    
-    const data = await response.json();
-    console.log('[ChatGPT Analyst] ✅ Direct API request successful:', {
-      url: apiUrl,
-      status: response.status,
-      hasMapping: !!data.mapping,
-      title: data.title || 'Untitled',
-      dataSize: JSON.stringify(data).length
-    });
-    
-    // Process the data immediately since we have it
-    const analysisData = extractSearchAndReasoning(data);
-    
-    if (analysisData.hasData) {
-      // Mark that we've received data
-      dataReceived = true;
-      
-      // Add API request info to metadata
-      analysisData.metadata.captureMethod = 'direct_api_request';
-      analysisData.metadata.captureUrl = apiUrl;
-      analysisData.metadata.captureTimestamp = new Date().toISOString();
-      
-      // Store current data
-      currentData = analysisData;
-      
-      // Save to localStorage for persistence
-      saveAnalysisToLocalStorage(analysisData);
-      
-      // Show results
-      showAnalysisResult(analysisData);
-    } else {
-      showAnalysisResult({
-        hasData: false,
-        searchQueries: [],
-        thoughts: [],
-        reasoning: [],
-        error: 'No search queries or internal reasoning found in this conversation. The conversation may not contain search-based interactions.',
-        metadata: {
-          captureMethod: 'direct_api_request',
-          captureUrl: apiUrl,
-          dataSize: JSON.stringify(data).length
-        }
-      });
-    }
-    
-    return {
-      success: true,
-      hasData: analysisData.hasData,
-      searchQueries: analysisData.searchQueries.length,
-      thoughts: analysisData.thoughts.length,
-      reasoning: analysisData.reasoning.length
-    };
-    
-  } catch (error) {
-    console.error('[ChatGPT Analyst] Direct API request failed:', error);
-    
-    const isConversationNotFound = error.message.includes('not found') || 
-                                   error.message.includes('404') ||
-                                   error.message.includes('expired');
-    
-    showAnalysisResult({
-      hasData: false,
-      searchQueries: [],
-      thoughts: [],
-      reasoning: [],
-      error: error.message,
-      isConversationNotFound: isConversationNotFound
-    });
-    
-    throw error;
-  }
 } 
