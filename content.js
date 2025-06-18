@@ -16,6 +16,38 @@ const CONFIG = {
   version: '1.0.0'
 };
 
+// Add message handler for background script communication
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('[ChatGPT Analyst] Received message:', message.action);
+  
+  if (message.action === 'networkData') {
+    // Process network data captured by debugger
+    console.log('[ChatGPT Analyst] 📊 Received network data from debugger');
+    processNetworkData(message);
+    sendResponse({ success: true });
+  } else if (message.action === 'debuggerError') {
+    console.log('[ChatGPT Analyst] ❌ Debugger error:', message.error);
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      error: message.error,
+      isConversationNotFound: message.error.includes('not found') || message.error.includes('404')
+    });
+    sendResponse({ success: true });
+  } else if (message.action === 'checkDataReceived') {
+    sendResponse({ dataReceived: dataReceived });
+  } else if (message.action === 'analyzeConversation') {
+    // Handle manual analysis request from popup
+    console.log('[ChatGPT Analyst] Manual analysis requested from popup');
+    analyzeConversationWithDebugger(true);
+    sendResponse({ success: true });
+  }
+  
+  return false; // Don't keep the response channel open
+});
+
 // Wait for page to be ready
 function waitForPageReady() {
   return new Promise((resolve) => {
@@ -42,21 +74,22 @@ function createOverlay() {
   // Add persistent attribute to prevent removal during navigation
   overlayElement.setAttribute('data-persistent', 'true');
   
-  // Create content container
-  const contentElement = document.createElement('div');
-  contentElement.id = CONFIG.contentId;
-  contentElement.className = 'chatgpt-analyst-content';
-  overlayElement.appendChild(contentElement);
-  
   // Header with title and controls
   const header = document.createElement('div');
   header.className = 'overlay-header';
   
   const title = document.createElement('h3');
-  title.textContent = 'ChatGPT SEO Analysis';
+  title.textContent = 'ChatGPT Analysis Results';
   
   const controls = document.createElement('div');
   controls.className = 'overlay-controls';
+  
+  // Analyze button
+  const analyzeBtn = document.createElement('button');
+  analyzeBtn.className = 'control-btn analyze-btn';
+  analyzeBtn.innerHTML = '🔍 Analyze';
+  analyzeBtn.title = 'Analyze current conversation';
+  analyzeBtn.onclick = () => analyzeConversationWithDebugger(true);
   
   // Toggle button
   const toggleBtn = document.createElement('button');
@@ -72,6 +105,7 @@ function createOverlay() {
   closeBtn.title = 'Close overlay';
   closeBtn.onclick = () => hideOverlay();
   
+  controls.appendChild(analyzeBtn);
   controls.appendChild(toggleBtn);
   controls.appendChild(closeBtn);
   
@@ -82,11 +116,24 @@ function createOverlay() {
   const contentDiv = document.createElement('div');
   contentDiv.id = CONFIG.contentId;
   contentDiv.className = 'overlay-content';
+  contentDiv.innerHTML = `
+    <div class="welcome-message">
+      <h4>🔍 ChatGPT Search Query Analyzer</h4>
+      <p>Click "Analyze" to extract search queries and internal reasoning from this conversation.</p>
+      <p><strong>How it works:</strong></p>
+      <ul>
+        <li>Uses Chrome Debugger API to capture network responses</li>
+        <li>Extracts search queries used by ChatGPT</li>
+        <li>Shows internal reasoning and thoughts</li>
+        <li>Works with any ChatGPT conversation</li>
+      </ul>
+    </div>
+  `;
   
   // Status indicator
   const statusDiv = document.createElement('div');
   statusDiv.className = 'overlay-status';
-  statusDiv.textContent = 'Waiting for ChatGPT responses...';
+  statusDiv.textContent = 'Ready to analyze conversation';
   
   overlayElement.appendChild(header);
   overlayElement.appendChild(contentDiv);
@@ -101,7 +148,7 @@ function createOverlay() {
     
     if (action === 'analyze') {
       event.preventDefault();
-      analyzeCurrentConversation();
+      analyzeConversationWithDebugger(true);
     } else if (action === 'copy') {
       event.preventDefault();
       const text = target.getAttribute('data-text');
@@ -127,60 +174,97 @@ function updateOverlayContent(data) {
   contentDiv.innerHTML = '';
   statusDiv.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
   
-  const relevantNodes = extractRelevantData(data);
-  
-  if (relevantNodes.length === 0) {
-    contentDiv.innerHTML = '<p class="no-data">No search queries or thoughts detected in this response.</p>';
-    // Still show promotional content even with no data
-    addPromotionalContent(contentDiv);
+  if (data.error) {
+    contentDiv.innerHTML = `
+      <div class="error-message">
+        <h4>❌ Analysis Error</h4>
+        <p>${data.error}</p>
+        ${data.isConversationNotFound ? `
+          <div class="troubleshooting">
+            <h5>🆕 This Conversation is No Longer Available</h5>
+            <p>The conversation you're trying to analyze has expired or been deleted from ChatGPT.</p>
+            <div class="solution-steps">
+              <h6>✅ Extension is working correctly! To test it:</h6>
+              <ol>
+                <li><strong>Start a new conversation</strong> with ChatGPT</li>
+                <li><strong>Ask a research question</strong> that triggers web search:<br>
+                    <em>"What are the latest AI breakthroughs in 2024?"</em><br>
+                    <em>"Compare the top programming languages this year"</em><br>
+                    <em>"What are current trends in web development?"</em>
+                </li>
+                <li><strong>Wait for ChatGPT's complete response</strong></li>
+                <li><strong>Click "Analyze" button</strong> to extract search data</li>
+              </ol>
+            </div>
+            <div class="action-buttons">
+              <button data-action="new-conversation" class="primary-btn">🚀 Start New Conversation</button>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
     return;
   }
   
-  // Create sections for different types of data
-  relevantNodes.forEach(item => {
-    const section = document.createElement('div');
-    section.className = 'data-section';
-    
-    if (item.type === 'search_queries') {
-      section.appendChild(createSearchQueriesSection(item.node));
-    } else if (item.type === 'thoughts') {
-      section.appendChild(createThoughtsSection(item.node));
-    }
-    
-    contentDiv.appendChild(section);
-  });
+  if (data.isLoading) {
+    contentDiv.innerHTML = `
+      <div class="loading-message">
+        <h4>🔄 Analyzing Conversation...</h4>
+        <p>Setting up Chrome Debugger to capture network responses...</p>
+      </div>
+    `;
+    return;
+  }
+  
+  if (data.isReloading) {
+    contentDiv.innerHTML = `
+      <div class="loading-message">
+        <h4>🔄 Page Reload in Progress...</h4>
+        <p>The page will reload automatically to capture fresh network traffic from ChatGPT.</p>
+      </div>
+    `;
+    return;
+  }
+  
+  if (!data.hasData) {
+    contentDiv.innerHTML = `
+      <div class="no-data">
+        <h4>🔍 No Search Data Found</h4>
+        <p>No search queries or internal reasoning detected in this conversation.</p>
+        <p><strong>Tips to get search data:</strong></p>
+        <ul>
+          <li>Ask questions that require web research</li>
+          <li>Request current information about recent events</li>
+          <li>Ask for comparisons or analysis of current topics</li>
+        </ul>
+      </div>
+    `;
+    return;
+  }
+  
+  // Show search queries
+  if (data.searchQueries && data.searchQueries.length > 0) {
+    const searchSection = createSearchQueriesDisplaySection(data.searchQueries);
+    contentDiv.appendChild(searchSection);
+  }
+  
+  // Show thoughts
+  if (data.thoughts && data.thoughts.length > 0) {
+    const thoughtsSection = createThoughtsDisplaySection(data.thoughts);
+    contentDiv.appendChild(thoughtsSection);
+  }
+  
+  // Show reasoning
+  if (data.reasoning && data.reasoning.length > 0) {
+    const reasoningSection = createReasoningDisplaySection(data.reasoning);
+    contentDiv.appendChild(reasoningSection);
+  }
   
   // Add export functionality
-  addExportButton(contentDiv, relevantNodes);
+  addExportButton(contentDiv, data);
   
   // Add promotional content
   addPromotionalContent(contentDiv);
-}
-
-// Extract relevant data from ChatGPT response
-function extractRelevantData(data) {
-  const relevantNodes = [];
-  
-  if (!data || !data.mapping) return relevantNodes;
-  
-  for (const nodeId in data.mapping) {
-    const node = data.mapping[nodeId];
-    
-    if (!node.message) continue;
-    
-    // Check for search queries
-    if (node.message.metadata?.search_queries?.length > 0) {
-      relevantNodes.push({ type: 'search_queries', node: node });
-    }
-    
-    // Check for thoughts
-    if (node.message.content?.content_type === 'thoughts' && 
-        node.message.content.thoughts?.length > 0) {
-      relevantNodes.push({ type: 'thoughts', node: node });
-    }
-  }
-  
-  return relevantNodes;
 }
 
 // Create search queries display section
@@ -226,19 +310,10 @@ function createThoughtsDisplaySection(thoughts) {
     const thoughtDiv = document.createElement('div');
     thoughtDiv.className = 'thought-item';
     
-    if (thought.summary) {
-      const summary = document.createElement('div');
-      summary.className = 'thought-summary';
-      summary.innerHTML = `<strong>Summary:</strong> ${escapeHtml(thought.summary)}`;
-      thoughtDiv.appendChild(summary);
-    }
-    
-    if (thought.content) {
-      const content = document.createElement('div');
-      content.className = 'thought-content';
-      content.innerHTML = `<strong>Content:</strong> ${escapeHtml(thought.content)}`;
-      thoughtDiv.appendChild(content);
-    }
+    const content = document.createElement('div');
+    content.className = 'thought-content';
+    content.innerHTML = `<strong>Thought ${index + 1}:</strong> ${escapeHtml(thought.thought || thought.summary || thought.content)}`;
+    thoughtDiv.appendChild(content);
     
     if (thought.timestamp) {
       const timestamp = document.createElement('div');
@@ -269,7 +344,7 @@ function createReasoningDisplaySection(reasoning) {
     
     const content = document.createElement('div');
     content.className = 'reasoning-content';
-    content.innerHTML = `<strong>${reasoningData.type}:</strong> ${escapeHtml(reasoningData.text)}`;
+    content.innerHTML = `<strong>Reasoning ${index + 1}:</strong> ${escapeHtml(reasoningData.reasoning || reasoningData.text)}`;
     reasoningDiv.appendChild(content);
     
     if (reasoningData.timestamp) {
@@ -282,36 +357,6 @@ function createReasoningDisplaySection(reasoning) {
     container.appendChild(reasoningDiv);
   });
   
-  return container;
-}
-
-// Create metadata section
-function createMetadataSection(metadata) {
-  const container = document.createElement('div');
-  container.className = 'metadata-section';
-  
-  const title = document.createElement('h4');
-  title.textContent = '📊 Conversation Info:';
-  title.className = 'section-title metadata-title';
-  container.appendChild(title);
-  
-  const metadataDiv = document.createElement('div');
-  metadataDiv.className = 'metadata-content';
-  metadataDiv.innerHTML = `
-    <div class="metadata-item">
-      <strong>Title:</strong> ${escapeHtml(metadata.conversationTitle)}
-    </div>
-    <div class="metadata-item">
-      <strong>Total Messages:</strong> ${metadata.totalMessages}
-    </div>
-    ${metadata.lastUpdate ? `
-      <div class="metadata-item">
-        <strong>Last Update:</strong> ${new Date(metadata.lastUpdate).toLocaleString()}
-      </div>
-    ` : ''}
-  `;
-  
-  container.appendChild(metadataDiv);
   return container;
 }
 
@@ -394,257 +439,51 @@ function showOverlay(analysisData) {
     createOverlay();
   }
   
-  const contentDiv = document.getElementById(CONFIG.contentId);
-  const statusDiv = document.querySelector(`#${CONFIG.overlayId} .overlay-status`);
+  // Update content
+  updateOverlayContent(analysisData);
   
-  if (!contentDiv || !statusDiv) {
-    console.error('[ChatGPT Analyst] Content div or status div not found!');
-    return;
-  }
-  
-  // Clear existing content
-  contentDiv.innerHTML = '';
-  
-  // Update status
-  if (analysisData.isLoading) {
-    statusDiv.textContent = 'Loading conversation data...';
-    contentDiv.innerHTML = `
-      <div class="loading-message">
-        <h4>🔄 Analyzing Conversation...</h4>
-        <p>Fetching conversation data from ChatGPT API...</p>
-      </div>
-    `;
-    showOverlayElement();
-    return;
-  } else if (analysisData.isWaiting) {
-    statusDiv.textContent = 'Waiting for network traffic...';
-    contentDiv.innerHTML = `
-      <div class="loading-message">
-        <h4>🔍 Monitoring Network Traffic...</h4>
-        <p>Waiting for ChatGPT to make API requests...</p>
-        <div class="user-guidance">
-          <p><strong>Try these actions to trigger network activity:</strong></p>
-          <ul>
-            <li>Ask ChatGPT a new question</li>
-            <li>Refresh the conversation (F5)</li>
-            <li>Navigate to a different active conversation</li>
-            <li>Start a new conversation with a research-oriented question</li>
-          </ul>
-        </div>
-        <p><small><strong>Current conversation ID:</strong> ${getCurrentConversationId()}</small></p>
-      </div>
-    `;
-    showOverlayElement();
-    return;
-  } else if (analysisData.isReloading) {
-    statusDiv.textContent = 'Reloading page to capture network traffic...';
-    contentDiv.innerHTML = `
-      <div class="loading-message">
-        <h4>🔄 Page Reload in Progress...</h4>
-        <p>The page will reload automatically to capture fresh network traffic from ChatGPT.</p>
-        <p><strong>What happens next:</strong></p>
-        <ul>
-          <li>Page reloads automatically</li>
-          <li>Extension monitors network requests</li>
-          <li>Conversation data is captured when available</li>
-          <li>Analysis results appear automatically</li>
-        </ul>
-        <p><small><strong>Current conversation ID:</strong> ${getCurrentConversationId()}</small></p>
-      </div>
-    `;
-    showOverlayElement();
-    return;
-  } else if (analysisData.error) {
-    statusDiv.textContent = `Error: ${analysisData.error}`;
-    
-    let troubleshootingTips = '';
-    if (analysisData.isConversationNotFound) {
-      troubleshootingTips = `
-        <div class="troubleshooting">
-          <h5>🆕 This Conversation is No Longer Available</h5>
-          <p>The conversation you're trying to analyze has expired or been deleted from ChatGPT.</p>
-          <div class="solution-steps">
-            <h6>✅ Extension is working correctly! To test it:</h6>
-            <ol>
-              <li><strong>Start a new conversation</strong> with ChatGPT</li>
-              <li><strong>Ask a research question</strong> that triggers web search:<br>
-                  <em>"What are the latest AI breakthroughs in 2024?"</em><br>
-                  <em>"Compare the top programming languages this year"</em><br>
-                  <em>"What are current trends in web development?"</em>
-              </li>
-              <li><strong>Wait for ChatGPT's complete response</strong></li>
-              <li><strong>Click "Analyze" button</strong> in the overlay to extract search data</li>
-            </ol>
-            <p><strong>✅ All systems working:</strong> Response interception ✓, Fallback strategies ✓, Error handling ✓</p>
-          </div>
-          <div class="action-buttons">
-            <button data-action="new-conversation" class="primary-btn">🚀 Start New Conversation</button>
-          </div>
-        </div>
-      `;
-    } else if (analysisData.error.includes('404')) {
-      troubleshootingTips = `
-        <div class="troubleshooting">
-          <h5>💡 Troubleshooting Tips:</h5>
-          <ul>
-            <li>This conversation may have expired or been deleted</li>
-            <li>Try starting a new conversation</li>
-            <li>Navigate to an existing active conversation</li>
-            <li>Check if you're still logged into ChatGPT</li>
-          </ul>
-        </div>
-      `;
-    } else if (analysisData.error.includes('401') || analysisData.error.includes('403')) {
-      troubleshootingTips = `
-        <div class="troubleshooting">
-          <h5>🔑 Authentication Issue:</h5>
-          <ul>
-            <li>Please make sure you're logged into ChatGPT</li>
-            <li>Try refreshing the page (F5)</li>
-            <li>Log out and back into ChatGPT</li>
-            <li>Clear browser cache and cookies for chatgpt.com</li>
-          </ul>
-        </div>
-      `;
-    } else if (analysisData.error.includes('communication error')) {
-      troubleshootingTips = `
-        <div class="troubleshooting">
-          <h5>🔧 Extension Issue:</h5>
-          <ul>
-            <li>Reload this page (F5)</li>
-            <li>Disable and re-enable the extension</li>
-            <li>Check if other extensions are interfering</li>
-            <li>Try opening ChatGPT in an incognito window</li>
-          </ul>
-        </div>
-      `;
-    }
-    
-    contentDiv.innerHTML = `
-      <div class="error-message">
-        <h4>⚠️ Analysis Error</h4>
-        <p>${escapeHtml(analysisData.error)}</p>
-        ${troubleshootingTips}
-        <div class="error-actions">
-          <button class="retry-btn" data-action="analyze">🔄 Retry Analysis</button>
-          <button class="new-conversation-btn" data-action="new-conversation">💬 New Conversation</button>
-        </div>
-        <details class="debug-info">
-          <summary>🔍 Debug Information</summary>
-          <p><small><strong>Current URL:</strong> ${window.location.href}</small></p>
-          <p><small><strong>Conversation ID:</strong> ${getCurrentConversationId() || 'Not found'}</small></p>
-          <p><small><strong>Timestamp:</strong> ${new Date().toISOString()}</small></p>
-        </details>
-      </div>
-    `;
-    showOverlayElement();
-    return;
-  } else {
-    statusDiv.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-  }
-  
-  // Show results
-  if (!analysisData.hasData) {
-    contentDiv.innerHTML = `
-      <div class="no-data">
-        <h4>🔍 No Analysis Data Found</h4>
-        <p>This conversation doesn't contain detectable search queries or internal reasoning.</p>
-        <p><small>Try asking ChatGPT a question that requires research or web searches.</small></p>
-      </div>
-    `;
-    showOverlayElement();
-    return;
-  }
-  
-  // Create sections for different types of data
-  if (analysisData.searchQueries && analysisData.searchQueries.length > 0) {
-    const section = createSearchQueriesDisplaySection(analysisData.searchQueries);
-    contentDiv.appendChild(section);
-  }
-  
-  if (analysisData.thoughts && analysisData.thoughts.length > 0) {
-    const section = createThoughtsDisplaySection(analysisData.thoughts);
-    contentDiv.appendChild(section);
-  }
-  
-  if (analysisData.reasoning && analysisData.reasoning.length > 0) {
-    const section = createReasoningDisplaySection(analysisData.reasoning);
-    contentDiv.appendChild(section);
-  }
-  
-  // Add metadata section
-  if (analysisData.metadata) {
-    const metadataSection = createMetadataSection(analysisData.metadata);
-    contentDiv.appendChild(metadataSection);
-  }
-  
-  // Add export functionality
-  addExportButton(contentDiv, analysisData);
-  
-  // Store current data
-  currentData = analysisData;
-  
-  // Show overlay
+  // Make sure overlay is visible
   showOverlayElement();
   
-  console.log('[ChatGPT Analyst] Analysis complete:', {
-    searchQueries: analysisData.searchQueries?.length || 0,
-    thoughts: analysisData.thoughts?.length || 0,
-    reasoning: analysisData.reasoning?.length || 0
-  });
-}
-
-// Show the overlay element
-function showOverlayElement() {
-  if (!document.getElementById(CONFIG.overlayId)) {
-    console.error('[ChatGPT Analyst] Overlay element not found!');
-    return;
-  }
-  
-  const overlay = document.getElementById(CONFIG.overlayId);
-  overlay.classList.add('visible');
-  overlayVisible = true;
   console.log('[ChatGPT Analyst] Overlay displayed successfully');
 }
 
-// Show/hide overlay functions
-function showOverlay() {
-  console.log('[ChatGPT Analyst] showOverlay called, overlayElement exists:', !!overlayElement);
-  if (!overlayElement) {
-    console.log('[ChatGPT Analyst] Creating overlay in showOverlay...');
-    createOverlay();
-  }
-  if (overlayElement) {
-    overlayElement.style.display = 'block';
+// Show overlay element
+function showOverlayElement() {
+  const overlay = document.getElementById(CONFIG.overlayId);
+  if (overlay) {
+    overlay.style.display = 'block';
     overlayVisible = true;
-    console.log('[ChatGPT Analyst] Overlay displayed successfully');
-  } else {
-    console.error('[ChatGPT Analyst] Cannot show overlay - overlayElement is still null after creation');
   }
 }
 
+// Hide overlay
 function hideOverlay() {
-  if (overlayElement) {
-    overlayElement.style.display = 'none';
+  const overlay = document.getElementById(CONFIG.overlayId);
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlayVisible = false;
   }
-  overlayVisible = false;
 }
 
+// Toggle overlay visibility
 function toggleOverlay() {
   if (overlayVisible) {
     hideOverlay();
   } else {
-    showOverlay();
+    showOverlayElement();
   }
 }
 
-// Utility functions
+// Escape HTML to prevent XSS
 function escapeHtml(text) {
+  if (typeof text !== 'string') return '';
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
 
+// Copy to clipboard functionality
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).then(() => {
     showNotification('Copied to clipboard!');
@@ -653,200 +492,54 @@ function copyToClipboard(text) {
   });
 }
 
+// Show notification
 function showNotification(message, type = 'success') {
   const notification = document.createElement('div');
   notification.className = `notification ${type}`;
   notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: ${type === 'error' ? '#f56565' : '#48bb78'};
+    color: white;
+    padding: 12px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 10001;
+    font-size: 14px;
+    max-width: 300px;
+  `;
   
   document.body.appendChild(notification);
   
   setTimeout(() => {
-    notification.classList.add('show');
-  }, 100);
-  
-  setTimeout(() => {
-    notification.classList.remove('show');
-    setTimeout(() => {
+    if (document.body.contains(notification)) {
       document.body.removeChild(notification);
-    }, 300);
-  }, 2000);
+    }
+  }, 3000);
 }
 
-// Listen for network data and test overlay messages
-window.addEventListener('message', (event) => {
-  if (event.source === window) {
-    if (event.data.type === 'CHATGPT_NETWORK_DATA') {
-      console.log('[ChatGPT Analyst] 🎉 Received network data:', {
-        url: event.data.url,
-        source: event.data.source,
-        conversationId: event.data.conversationId
-      });
-      
-      // Process the captured network data
-      processNetworkData(event.data);
-      
-    } else if (event.data.type === 'TEST_OVERLAY') {
-      // Test the overlay system
-      console.log('[ChatGPT Analyst] Testing overlay display...');
-      showAnalysisResult({
-        hasData: true,
-        searchQueries: [
-          { query: 'latest AI developments 2024', timestamp: new Date().toISOString(), messageId: 'test1', author: 'assistant' },
-          { query: 'machine learning trends', timestamp: new Date().toISOString(), messageId: 'test2', author: 'assistant' }
-        ],
-        thoughts: [
-          { content: 'This is a test thought to verify the overlay system works correctly.', summary: 'Test thought', timestamp: new Date().toISOString(), messageId: 'test1', author: 'system' }
-        ],
-        reasoning: [
-          { text: 'Test reasoning pattern to show how search logic is displayed.', type: 'search_reasoning', timestamp: new Date().toISOString(), messageId: 'test1', author: 'assistant' }
-        ],
-        metadata: {
-          conversationTitle: 'Test Conversation',
-          lastUpdate: new Date().toISOString(),
-          totalMessages: 3,
-          captureMethod: 'test_data'
-        },
-        error: null,
-        isConversationNotFound: false
-      });
-    }
-  }
-});
-
-// Message handler for background script communication
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('[ChatGPT Analyst] Received message:', request);
-  
-  switch (request.action) {
-    case 'analyzeConversation':
-      console.log('[ChatGPT Analyst] Starting analysis...');
-      analyzeConversationWithDebugger(request.manual || false);
-      sendResponse({ status: 'success' });
-      break;
-      
-    case 'toggleOverlay':
-      toggleOverlay();
-      sendResponse({ status: 'success', visible: overlayVisible });
-      break;
-      
-    case 'getOverlayStatus':
-      sendResponse({ 
-        status: 'success', 
-        visible: overlayVisible,
-        hasData: currentData !== null,
-        conversationId: getCurrentConversationId()
-      });
-      break;
-      
-    case 'updateSettings':
-      if (request.settings) {
-        CONFIG.autoShow = request.settings.autoShow;
-        console.log('[ChatGPT Analyst] Settings updated:', request.settings);
-      }
-      sendResponse({ status: 'success' });
-      break;
-      
-    case 'clearData':
-      currentData = null;
-      if (overlayElement) {
-        const contentDiv = document.getElementById(CONFIG.contentId);
-        if (contentDiv) {
-          contentDiv.innerHTML = '<p class="no-data">Analysis data cleared.</p>';
-          addPromotionalContent(contentDiv);
-        }
-      }
-      sendResponse({ status: 'success' });
-      break;
-      
-    case 'networkData':
-      processNetworkData(request);
-      sendResponse({ status: 'success' });
-      break;
-      
-    case 'debuggerError':
-      console.error('[ChatGPT Analyst] Debugger error:', request.error);
-      // Only show error if we haven't received data yet
-      if (!dataReceived) {
-        // If it's a timeout and we need fresh data, refresh the page
-        if (request.error.includes('Timeout') || request.error.includes('message port closed')) {
-          console.log('[ChatGPT Analyst] Refreshing page due to debugger timeout...');
-          setTimeout(() => {
-            window.location.reload();
-          }, 1000);
-        } else {
-          showAnalysisResult({
-            hasData: false,
-            searchQueries: [],
-            thoughts: [],
-            reasoning: [],
-            error: request.error
-          });
-        }
-      } else {
-        console.log('[ChatGPT Analyst] Ignoring debugger error because data was already received');
-      }
-      sendResponse({ status: 'success' });
-      break;
-      
-    case 'checkDataReceived':
-      console.log('[ChatGPT Analyst] Checking if data was received:', dataReceived);
-      sendResponse({ dataReceived: dataReceived });
-      break;
-      
-    default:
-      console.warn('[ChatGPT Analyst] Unknown action:', request.action);
-      sendResponse({ status: 'error', message: 'Unknown action' });
-  }
-  
-  return true; // Keep message channel open for async response
-});
-
-// Global function removed - using event delegation to avoid CSP violations
-
-// Keyboard shortcut handler
-document.addEventListener('keydown', (event) => {
-  // Ctrl+Shift+S to toggle overlay
-  if (event.ctrlKey && event.shiftKey && event.key === 'S') {
-    event.preventDefault();
-    toggleOverlay();
-  }
-  
-  // Ctrl+Shift+A to trigger analysis
-  if (event.ctrlKey && event.shiftKey && event.key === 'A') {
-    event.preventDefault();
-    analyzeCurrentConversation();
-  }
-});
-
-// Auto-trigger analysis when page content changes (new messages) - DISABLED to prevent reload loops
-let lastMessageCount = 0;
-function observeForNewMessages() {
-  console.log('[ChatGPT Analyst] Auto-analysis disabled to prevent reload loops - use manual analysis instead');
-  /*
-  const observer = new MutationObserver((mutations) => {
-    // Check if new message elements were added
-    const messageElements = document.querySelectorAll('[data-message-author-role]');
-    if (messageElements.length > lastMessageCount) {
-      lastMessageCount = messageElements.length;
-      // Wait a bit for the message to be fully rendered
-      setTimeout(() => {
-        console.log('[ChatGPT Analyst] New message detected, triggering analysis...');
-        analyzeCurrentConversation();
-      }, 2000);
-    }
-  });
-  
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-  */
-}
-
-// Extract conversation ID from current URL
+// Get current conversation ID from URL
 function getCurrentConversationId() {
-  const match = window.location.pathname.match(/\/c\/([a-f0-9-]{36})/);
-  return match ? match[1] : null;
+  const url = window.location.href;
+  const patterns = [
+    /chatgpt\.com\/c\/([a-zA-Z0-9-]+)/,
+    /chatgpt\.com\/conversation\/([a-zA-Z0-9-]+)/,
+    /chatgpt\.com\/chat\/([a-zA-Z0-9-]+)/,
+    /chat\.openai\.com\/c\/([a-zA-Z0-9-]+)/,
+    /chat\.openai\.com\/conversation\/([a-zA-Z0-9-]+)/,
+    /chat\.openai\.com\/chat\/([a-zA-Z0-9-]+)/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  
+  return null;
 }
 
 // Analyze conversation with debugger-based approach
@@ -880,6 +573,15 @@ function analyzeConversationWithDebugger(manual = false) {
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
   console.log('[ChatGPT Analyst] Will refresh page to capture network traffic...');
+  
+  // Show reloading state
+  showAnalysisResult({
+    isReloading: true,
+    hasData: false,
+    searchQueries: [],
+    thoughts: [],
+    reasoning: []
+  });
   
   // Send message to background script to start debugger capture
   chrome.runtime.sendMessage({
@@ -1232,12 +934,6 @@ function showAnalysisResult(result) {
   showOverlay(result);
 }
 
-// Clean up function - no longer needed with direct API approach
-
-
-
- 
-
 // Setup mutation observer to ensure overlay persists
 function setupOverlayPersistence() {
   // Create a mutation observer to watch for DOM changes
@@ -1313,10 +1009,7 @@ function debugAnalysis() {
   console.log('[ChatGPT Analyst] Running debug analysis...');
   
   // Trigger manual analysis
-  chrome.runtime.sendMessage({
-    action: "analyzeConversation",
-    manual: true
-  });
+  analyzeConversationWithDebugger(true);
 }
 
 // Initialize extension on page load
@@ -1330,6 +1023,7 @@ if (document.readyState === 'loading') {
 function initializeExtension() {
   // Prevent double initialization
   if (window.chatgptAnalystInitialized) {
+    console.log('[ChatGPT Analyst] Extension already initialized, skipping...');
     return;
   }
   window.chatgptAnalystInitialized = true;
@@ -1368,9 +1062,6 @@ function initializeExtension() {
   console.log('[ChatGPT Analyst] Debug commands available:');
   console.log('- window.testChatGPTAnalystOverlay() - Test overlay display');
   console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
-  
-  // Disable auto-analysis to prevent reload loops
-  console.log('[ChatGPT Analyst] Auto-analysis disabled to prevent reload loops - use manual analysis instead');
   
   console.log('[ChatGPT Analyst] Extension initialized successfully');
 } 
