@@ -158,6 +158,9 @@ function createOverlay() {
     } else if (action === 'new-conversation') {
       event.preventDefault();
       window.open('https://chatgpt.com/', '_blank');
+    } else if (action === 'refresh-page') {
+      event.preventDefault();
+      window.location.reload();
     }
   });
   
@@ -277,7 +280,7 @@ function updateOverlayContent(data) {
           </ul>
         </div>
         <div class="action-buttons">
-          <button onclick="window.location.reload()" class="primary-btn">🔄 Refresh Page Now</button>
+          <button data-action="refresh-page" class="primary-btn">🔄 Refresh Page Now</button>
         </div>
       </div>
     `;
@@ -684,10 +687,25 @@ function analyzeConversationWithDebugger(manual = false) {
 
 // Process captured network data from background script
 function processNetworkData(networkData) {
-  console.log('[ChatGPT Analyst] 🔍 Processing captured network data...');
+  console.log('[ChatGPT Analyst] 🔍 Processing captured network data...', {
+    source: networkData.source,
+    url: networkData.url,
+    timestamp: networkData.timestamp,
+    dataKeys: networkData.data ? Object.keys(networkData.data) : []
+  });
   
   try {
     const data = networkData.data;
+    
+    // Log the structure of the received data
+    console.log('[ChatGPT Analyst] 📊 Data structure analysis:', {
+      hasMapping: !!data.mapping,
+      mappingKeys: data.mapping ? Object.keys(data.mapping).length : 0,
+      hasSafe: !!data.safe,
+      hasBlocked: !!data.blocked,
+      mainKeys: Object.keys(data),
+      dataType: typeof data
+    });
     
     // Mark that we've received data
     dataReceived = true;
@@ -727,7 +745,8 @@ function processNetworkData(networkData) {
         metadata: {
           captureMethod: networkData.source,
           captureUrl: networkData.url,
-          dataSize: JSON.stringify(data).length
+          dataSize: JSON.stringify(data).length,
+          dataStructure: Object.keys(data)
         }
       });
     }

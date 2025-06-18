@@ -111,72 +111,95 @@ function setupNetworkInterception(tabId, conversationId) {
         
         console.log('[ChatGPT Analyst] 🌐 Network domain enabled, intercepting requests...');
         
-        // Set up the network listener
-        const onNetworkEvent = (debuggeeId, message, params) => {
-          if (debuggeeId.tabId !== tabId) return;
-          
-          if (message === 'Network.responseReceived') {
-            const {requestId, response} = params;
-            const url = response.url;
-            
-            // Check if this is the conversation API request we want
-            if (url.includes(`/backend-api/conversation/${conversationId}`) && 
-                !url.includes('/textdocs') && 
-                !url.includes('/attachments') &&
-                response.status === 200) {
-              
-              console.log('[ChatGPT Analyst] 🎯 INTERCEPTED conversation API request:', url);
-              
-              // Get the response body
-              chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
-                if (chrome.runtime.lastError) {
-                  console.warn('[ChatGPT Analyst] Error getting response body:', chrome.runtime.lastError.message);
-                  return;
-                }
-                
-                try {
-                  let body = bodyResult.body;
-                  if (bodyResult.base64Encoded) {
-                    body = atob(body);
-                  }
-                  
-                  const jsonData = JSON.parse(body);
-                  console.log('[ChatGPT Analyst] ✅ Successfully intercepted and parsed JSON:', {
-                    url: url,
-                    status: response.status,
-                    hasMapping: !!jsonData.mapping,
-                    title: jsonData.title || 'Untitled',
-                    dataSize: body.length
-                  });
-                  
-                  // Send the intercepted data to content script
-                  chrome.tabs.sendMessage(tabId, {
-                    action: 'networkData',
-                    source: 'network_interception',
-                    url: url,
-                    conversationId: conversationId,
-                    timestamp: Date.now(),
-                    data: jsonData
-                  });
-                  
-                  // Clean up after successful interception
-                  chrome.debugger.onEvent.removeListener(onNetworkEvent);
-                  chrome.debugger.detach({tabId}, () => {
-                    activeDebuggers.delete(debuggerKey);
-                    console.log('[ChatGPT Analyst] 🎉 Network interception successful, debugger detached');
-                  });
-                  
-                } catch (e) {
-                  console.error('[ChatGPT Analyst] Error parsing intercepted JSON:', e);
-                  chrome.tabs.sendMessage(tabId, {
-                    action: 'debuggerError',
-                    error: `Error parsing response: ${e.message}`
-                  });
-                }
-              });
-            }
-          }
-        };
+                 // Set up the network listener
+         const onNetworkEvent = (debuggeeId, message, params) => {
+           if (debuggeeId.tabId !== tabId) return;
+           
+           if (message === 'Network.responseReceived') {
+             const {requestId, response} = params;
+             const url = response.url;
+             
+             // Log all conversation API responses for debugging
+             if (url.includes('/backend-api/conversation/')) {
+               console.log('[ChatGPT Analyst] 🔍 Found conversation API response:', {
+                 url: url,
+                 status: response.status,
+                 mimeType: response.mimeType,
+                 headers: response.headers
+               });
+             }
+             
+             // Check if this is the main conversation API request we want
+             if (url.includes(`/backend-api/conversation/${conversationId}`) && 
+                 !url.includes('/textdocs') && 
+                 !url.includes('/attachments') &&
+                 !url.includes('/moderations') &&
+                 !url.includes('/files') &&
+                 response.status === 200 &&
+                 response.mimeType && response.mimeType.includes('application/json')) {
+               
+               console.log('[ChatGPT Analyst] 🎯 INTERCEPTED main conversation API request:', url);
+               
+               // Get the response body
+               chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
+                 if (chrome.runtime.lastError) {
+                   console.warn('[ChatGPT Analyst] Error getting response body:', chrome.runtime.lastError.message);
+                   return;
+                 }
+                 
+                 try {
+                   let body = bodyResult.body;
+                   if (bodyResult.base64Encoded) {
+                     body = atob(body);
+                   }
+                   
+                   console.log('[ChatGPT Analyst] 📄 Raw response body preview:', body.substring(0, 200) + '...');
+                   
+                   const jsonData = JSON.parse(body);
+                   console.log('[ChatGPT Analyst] ✅ Successfully intercepted and parsed JSON:', {
+                     url: url,
+                     status: response.status,
+                     hasMapping: !!jsonData.mapping,
+                     hasSafe: !!jsonData.safe,
+                     hasBlocked: !!jsonData.blocked,
+                     keys: Object.keys(jsonData),
+                     title: jsonData.title || 'Untitled',
+                     dataSize: body.length
+                   });
+                   
+                   // Only process if this looks like a real conversation (has mapping)
+                   if (jsonData.mapping && Object.keys(jsonData.mapping).length > 0) {
+                     // Send the intercepted data to content script
+                     chrome.tabs.sendMessage(tabId, {
+                       action: 'networkData',
+                       source: 'network_interception',
+                       url: url,
+                       conversationId: conversationId,
+                       timestamp: Date.now(),
+                       data: jsonData
+                     });
+                     
+                     // Clean up after successful interception
+                     chrome.debugger.onEvent.removeListener(onNetworkEvent);
+                     chrome.debugger.detach({tabId}, () => {
+                       activeDebuggers.delete(debuggerKey);
+                       console.log('[ChatGPT Analyst] 🎉 Network interception successful, debugger detached');
+                     });
+                   } else {
+                     console.log('[ChatGPT Analyst] ⚠️ Skipping response - no valid mapping found, keys:', Object.keys(jsonData));
+                   }
+                   
+                 } catch (e) {
+                   console.error('[ChatGPT Analyst] Error parsing intercepted JSON:', e);
+                   chrome.tabs.sendMessage(tabId, {
+                     action: 'debuggerError',
+                     error: `Error parsing response: ${e.message}`
+                   });
+                 }
+               });
+             }
+           }
+         };
         
         // Start listening for network events
         chrome.debugger.onEvent.addListener(onNetworkEvent);
