@@ -609,7 +609,7 @@ function analyzeCurrentConversation() {
     isLoading: true
   });
   
-  // Request manual analysis from background script
+  // Request manual analysis from background script (this will reload the page)
   chrome.runtime.sendMessage({
     action: "manualAnalysis",
     conversationId: conversationId
@@ -638,21 +638,16 @@ function analyzeCurrentConversation() {
       return;
     }
     
-    console.log('[ChatGPT Analyst] Manual analysis initiated, waiting for response...');
-    
-    // Set a timeout to show waiting state if no response comes quickly
-    setTimeout(() => {
-      if (currentData && currentData.isLoading) {
-        console.log('[ChatGPT Analyst] Switching to waiting mode...');
-        showAnalysisResult({
-          hasData: false,
-          searchQueries: [],
-          thoughts: [],
-          reasoning: [],
-          isWaiting: true
-        });
-      }
-    }, 3000);
+    if (response && response.action === 'reloading') {
+      console.log('[ChatGPT Analyst] Page will reload to capture fresh network traffic...');
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        isReloading: true
+      });
+    }
   });
 }
 
@@ -790,6 +785,25 @@ function showAnalysisResult(analysisData) {
             <li>Start a new conversation with a research-oriented question</li>
           </ul>
         </div>
+        <p><small><strong>Current conversation ID:</strong> ${getCurrentConversationId()}</small></p>
+      </div>
+    `;
+    addPromotionalContent(contentDiv);
+    showOverlay();
+    return;
+  } else if (analysisData.isReloading) {
+    statusDiv.textContent = 'Reloading page to capture network traffic...';
+    contentDiv.innerHTML = `
+      <div class="loading-message">
+        <h4>🔄 Page Reload in Progress...</h4>
+        <p>The page will reload automatically to capture fresh network traffic from ChatGPT.</p>
+        <p><strong>What happens next:</strong></p>
+        <ul>
+          <li>Page reloads automatically</li>
+          <li>Extension monitors network requests</li>
+          <li>Conversation data is captured when available</li>
+          <li>Analysis results appear automatically</li>
+        </ul>
         <p><small><strong>Current conversation ID:</strong> ${getCurrentConversationId()}</small></p>
       </div>
     `;

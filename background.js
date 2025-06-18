@@ -1,46 +1,36 @@
 // ChatGPT SEO Analyst - Background Service Worker
-// Monitors network traffic and coordinates with content script
+// Simplified version that mimics user workflow: reload + intercept network traffic
 
-let activeAnalysis = {};
-let requestCounts = {};
-
-// Store active requests to match with responses
 let activeRequests = {};
+let capturedConversationData = {};
 
-// Track conversation API requests
+// Monitor ALL network requests to find conversation data
 chrome.webRequest.onBeforeRequest.addListener(
   function(details) {
     const tabId = details.tabId;
     
-    // Initialize tracking for this tab
-    if (!requestCounts[tabId]) {
-      requestCounts[tabId] = 0;
-    }
-    
-    console.log(`[ChatGPT Analyst] Intercepted conversation request: ${details.url}`);
-    
-    // Store request details to match with response
+    // Store request for matching with response
     activeRequests[details.requestId] = {
       url: details.url,
       tabId: tabId,
       timestamp: Date.now(),
-      requestId: details.requestId
+      method: details.method
     };
+    
+    console.log(`[ChatGPT Analyst] Monitoring request: ${details.method} ${details.url}`);
     
     return {cancel: false};
   },
   {
     urls: [
-      "https://chatgpt.com/backend-api/conversation/*",
-      "https://chatgpt.com/backend-api/conversations*",
-      "https://chatgpt.com/backend-api/conversation",
-      "https://chatgpt.com/backend-anon/conversation*"
+      "https://chatgpt.com/*",
+      "https://*.chatgpt.com/*"
     ]
   },
   ["requestBody"]
 );
 
-// Monitor completed requests and inject response interceptor
+// Intercept responses that contain conversation data
 chrome.webRequest.onCompleted.addListener(
   function(details) {
     const requestInfo = activeRequests[details.requestId];
@@ -48,350 +38,275 @@ chrome.webRequest.onCompleted.addListener(
     
     const tabId = requestInfo.tabId;
     
-    // Debug: Log all conversation-related requests (successful and failed)
-    console.log(`[ChatGPT Analyst] Request completed:`, {
-      url: details.url,
-      method: details.method,
-      statusCode: details.statusCode
-    });
+    // Log all completed requests for debugging
+    console.log(`[ChatGPT Analyst] Response: ${details.method} ${details.url} -> ${details.statusCode}`);
     
-    // Check if this is a conversation data endpoint (GET request to conversation with UUID)
-    // Updated patterns based on current ChatGPT API structure
-    const conversationMatch = details.url.match(/\/backend-api\/conversation[s]?\/([a-f0-9-]{36})/) ||
-                             details.url.match(/\/backend-api\/conversation\/([a-f0-9-]{36})/) ||
-                             details.url.match(/\/backend-anon\/conversation\/([a-f0-9-]{36})/);
+    // Look for any request that might contain conversation data
+    const isConversationRelated = 
+      details.url.includes('/backend-api/') && 
+      details.statusCode === 200 &&
+      (details.method === 'GET' || details.method === 'POST');
     
-    if (conversationMatch) {
-      const conversationId = conversationMatch[1] || conversationMatch[2] || conversationMatch[3];
-      console.log(`[ChatGPT Analyst] Detected conversation data request: ${details.url}`);
-      console.log(`[ChatGPT Analyst] Conversation ID: ${conversationId}, Status: ${details.statusCode}`);
+    if (isConversationRelated) {
+      console.log(`[ChatGPT Analyst] Found potential conversation data: ${details.url}`);
       
-      // Only try to intercept successful requests (200) and client errors that might work with auth (401, 403)
-      if (details.statusCode === 200) {
-        console.log(`[ChatGPT Analyst] Successful request - attempting interception`);
-        chrome.scripting.executeScript({
-          target: { tabId: tabId },
-          world: 'MAIN',
-          func: interceptConversationResponse,
-          args: [details.url, conversationId, details.statusCode]
-        }).catch(error => {
-          console.warn('Could not inject response interceptor:', error);
-        });
-      } else if (details.statusCode === 404) {
-        console.log(`[ChatGPT Analyst] 404 Error - conversation doesn't exist or has expired: ${conversationId}`);
-        // Send error to content script without trying to re-fetch
-        chrome.scripting.executeScript({
-          target: { tabId: tabId },
-          world: 'MAIN',
-          func: notifyConversationError,
-          args: [conversationId, `Conversation not found (404). This conversation may have expired or been deleted.`]
-        }).catch(error => {
-          console.warn('Could not inject error notification:', error);
-        });
-      } else if (details.statusCode === 401 || details.statusCode === 403) {
-        console.log(`[ChatGPT Analyst] Auth error (${details.statusCode}) - attempting interception with better auth`);
-        chrome.scripting.executeScript({
-          target: { tabId: tabId },
-          world: 'MAIN',
-          func: interceptConversationResponse,
-          args: [details.url, conversationId, details.statusCode]
-        }).catch(error => {
-          console.warn('Could not inject response interceptor:', error);
-        });
-      } else {
-        console.log(`[ChatGPT Analyst] HTTP ${details.statusCode} - skipping interception attempt`);
-        chrome.scripting.executeScript({
-          target: { tabId: tabId },
-          world: 'MAIN',
-          func: notifyConversationError,
-          args: [conversationId, `HTTP ${details.statusCode}: ${details.statusCode === 500 ? 'Server error' : 'Request failed'}`]
-        }).catch(error => {
-          console.warn('Could not inject error notification:', error);
-        });
-      }
-      
-      // Update badge for detected conversation requests
-      requestCounts[tabId] = (requestCounts[tabId] || 0) + 1;
-      chrome.action.setBadgeText({
-        text: requestCounts[tabId].toString(),
-        tabId: tabId
+      // Try to intercept this response
+      chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'MAIN',
+        func: interceptAnyConversationResponse,
+        args: [details.url, details.method]
+      }).catch(error => {
+        console.warn('Could not inject interceptor:', error);
       });
-      chrome.action.setBadgeBackgroundColor({
-        color: details.statusCode === 200 ? "#4CAF50" : "#FF9800", // Green for success, Orange for errors
-        tabId: tabId
-      });
-    } else {
-      // Debug: Show what didn't match
-      if (details.url.includes('/backend-api/conversation/')) {
-        console.log(`[ChatGPT Analyst] Conversation URL didn't match pattern: ${details.url}`);
-      }
     }
     
-    // Clean up request tracking
+    // Clean up
     delete activeRequests[details.requestId];
   },
   {
     urls: [
-      "https://chatgpt.com/backend-api/conversation/*",
-      "https://chatgpt.com/backend-api/conversations*",
-      "https://chatgpt.com/backend-api/conversation",
-      "https://chatgpt.com/backend-anon/conversation*"
+      "https://chatgpt.com/*",
+      "https://*.chatgpt.com/*"
     ]
   },
   ["responseHeaders"]
 );
 
-// Function to notify of conversation errors without attempting fetch
-function notifyConversationError(conversationId, errorMessage) {
-  console.log('[ChatGPT Analyst] Conversation error:', errorMessage);
+// Simplified function to intercept any response that might contain conversation data
+function interceptAnyConversationResponse(responseUrl, method) {
+  console.log(`[ChatGPT Analyst] Intercepting: ${method} ${responseUrl}`);
   
-  // Send error info to content script
-  window.postMessage({
-    type: 'CHATGPT_CONVERSATION_ERROR',
-    error: errorMessage,
-    conversationId: conversationId,
-    timestamp: Date.now()
-  }, '*');
-}
-
-// Function to inject into main world to intercept responses
-function interceptConversationResponse(apiUrl, conversationId, originalStatusCode) {
-  console.log('[ChatGPT Analyst] Injected interceptor for:', apiUrl);
-  console.log('[ChatGPT Analyst] Conversation ID:', conversationId);
-  console.log('[ChatGPT Analyst] Original request status:', originalStatusCode);
+  // Get conversation ID from current page
+  const conversationId = getCurrentConversationId();
+  if (!conversationId) {
+    console.log('[ChatGPT Analyst] No conversation ID found');
+    return;
+  }
   
-  // First, try to get the latest auth token from the page
-  let authToken = null;
+  console.log(`[ChatGPT Analyst] Looking for conversation ID: ${conversationId}`);
   
-  // Method 1: Check if there's a current fetch with auth headers
+  // Override fetch to capture responses
   const originalFetch = window.fetch;
-  let tokenPromise = new Promise((resolve) => {
-    // Override fetch temporarily to capture auth token
-    window.fetch = function(...args) {
-      const result = originalFetch.apply(this, args);
+  
+  // Monitor all fetch requests for conversation data
+  window.fetch = function(...args) {
+    const result = originalFetch.apply(this, args);
+    
+    result.then(response => {
+      const url = args[0];
       
-      try {
-        const [url, options] = args;
-        if (url && url.includes('/backend-api/') && options && options.headers) {
-          const headers = options.headers;
-          if (headers.authorization && headers.authorization.startsWith('Bearer ')) {
-            authToken = headers.authorization.replace('Bearer ', '');
-            console.log('[ChatGPT Analyst] Captured fresh auth token');
-            resolve(authToken);
+      // Check if this response might contain our conversation data
+      if (typeof url === 'string' && 
+          url.includes('/backend-api/') && 
+          response.ok) {
+        
+        // Clone response to read without consuming original
+        response.clone().json().then(data => {
+          
+          // Check if this data contains our conversation
+          if (isConversationData(data, conversationId)) {
+            console.log('[ChatGPT Analyst] Found conversation data!', {
+              url: url,
+              method: response.method || 'GET',
+              dataSize: JSON.stringify(data).length,
+              hasMapping: !!data.mapping,
+              title: data.title
+            });
+            
+            // Send to content script
+            window.postMessage({
+              type: 'CHATGPT_CONVERSATION_DATA',
+              data: data,
+              conversationId: conversationId,
+              url: url,
+              timestamp: Date.now()
+            }, '*');
+            
+            // Restore original fetch
+            window.fetch = originalFetch;
           }
-        }
-      } catch (e) {
-        // Continue without error
+        }).catch(e => {
+          // Not JSON or other error, ignore
+        });
+      }
+    }).catch(e => {
+      // Request failed, ignore
+    });
+    
+    return result;
+  };
+  
+  // Restore fetch after 10 seconds if no data found
+  setTimeout(() => {
+    window.fetch = originalFetch;
+    console.log('[ChatGPT Analyst] Fetch monitoring timeout');
+  }, 10000);
+  
+  // Helper function to check if data contains conversation
+  function isConversationData(data, targetId) {
+    if (!data || typeof data !== 'object') return false;
+    
+    // Check if this is conversation data
+    if (data.mapping && Object.keys(data.mapping).length > 0) {
+      // Check if conversation ID matches
+      if (data.conversation_id === targetId) {
+        return true;
       }
       
-      return result;
-    };
-    
-    // Restore fetch after 2 seconds
-    setTimeout(() => {
-      window.fetch = originalFetch;
-      resolve(authToken);
-    }, 2000);
-  });
-  
-  // Method 2: Check stored tokens
-  if (!authToken) {
-    try {
-      authToken = localStorage.getItem('auth_token') || 
-                 localStorage.getItem('access_token') ||
-                 localStorage.getItem('authToken') ||
-                 sessionStorage.getItem('auth_token');
-    } catch (e) {
-      console.warn('[ChatGPT Analyst] Could not access stored tokens:', e);
+      // Or check if URL contained the ID
+      if (data.id === targetId) {
+        return true;
+      }
+      
+      // Or check if any message references our conversation
+      for (const nodeId in data.mapping) {
+        const node = data.mapping[nodeId];
+        if (node && node.message) {
+          return true; // Found message structure, likely our conversation
+        }
+      }
     }
+    
+    return false;
   }
   
-  // Method 3: Try different URL patterns based on user workflow
-  const tryUrls = [
-    apiUrl, // Original URL
-    `https://chatgpt.com/backend-api/conversation/${conversationId}`,
-    `https://chatgpt.com/backend-api/conversations/${conversationId}`,
-    `https://chatgpt.com/backend-anon/conversation/${conversationId}`
-  ];
-  
-  console.log('[ChatGPT Analyst] Will try URLs:', tryUrls);
-  
-  // Wait for potential auth token capture, then try requests
-  tokenPromise.then((capturedToken) => {
-    const finalAuthToken = capturedToken || authToken;
-    console.log('[ChatGPT Analyst] Using auth token:', finalAuthToken ? 'Yes' : 'No');
-    
-    // Try each URL pattern
-    let attempts = 0;
-    
-    function tryNextUrl() {
-      if (attempts >= tryUrls.length) {
-        console.warn('[ChatGPT Analyst] All URL patterns failed');
-        window.postMessage({
-          type: 'CHATGPT_CONVERSATION_ERROR',
-          error: 'Could not find conversation data using any known URL pattern',
-          conversationId: conversationId,
-          url: apiUrl,
-          timestamp: Date.now()
-        }, '*');
-        return;
-      }
-      
-      const currentUrl = tryUrls[attempts];
-      attempts++;
-      
-      console.log(`[ChatGPT Analyst] Trying URL ${attempts}/${tryUrls.length}: ${currentUrl}`);
-      
-      // Build headers
-      const headers = {
-        'accept': 'application/json, text/plain, */*',
-        'accept-language': navigator.language || 'en-US,en;q=0.9',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-origin'
-      };
-      
-      if (finalAuthToken) {
-        headers['authorization'] = `Bearer ${finalAuthToken}`;
-      }
-      
-      // Add OpenAI specific headers if available
-      try {
-        const deviceId = document.querySelector('meta[name="oai-device-id"]')?.content ||
-                        localStorage.getItem('oai-device-id');
-        const clientVersion = document.querySelector('meta[name="oai-client-version"]')?.content ||
-                             'prod-latest';
-        
-        if (deviceId) headers['oai-device-id'] = deviceId;
-        headers['oai-client-version'] = clientVersion;
-      } catch (e) {
-        // Optional headers, continue without them
-      }
-      
-      fetch(currentUrl, {
-        method: 'GET',
-        credentials: 'include',
-        headers: headers,
-        mode: 'cors'
-      })
-      .then(response => {
-        console.log(`[ChatGPT Analyst] Response from ${currentUrl}:`, {
-          status: response.status,
-          statusText: response.statusText,
-          contentType: response.headers.get('content-type')
-        });
-        
-        if (response.ok) {
-          return response.json();
-        } else if (response.status === 404 && attempts < tryUrls.length) {
-          // Try next URL
-          console.log(`[ChatGPT Analyst] 404 on ${currentUrl}, trying next...`);
-          tryNextUrl();
-          return null;
-        } else {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-      })
-      .then(data => {
-        if (!data) return; // Skip if we're trying next URL
-        
-        console.log('[ChatGPT Analyst] Successfully intercepted conversation data:', {
-          url: currentUrl,
-          dataSize: JSON.stringify(data).length,
-          hasMapping: !!data.mapping,
-          mappingKeys: data.mapping ? Object.keys(data.mapping).length : 0,
-          title: data.title
-        });
-        
-        // Send success data to content script
-        window.postMessage({
-          type: 'CHATGPT_CONVERSATION_DATA',
-          data: data,
-          conversationId: conversationId,
-          url: currentUrl,
-          timestamp: Date.now()
-        }, '*');
-      })
-      .catch(error => {
-        console.warn(`[ChatGPT Analyst] Error with ${currentUrl}:`, error.message);
-        
-        if (attempts < tryUrls.length) {
-          // Try next URL
-          tryNextUrl();
-        } else {
-          // All attempts failed
-          console.error('[ChatGPT Analyst] All conversation fetch attempts failed:', error);
-          window.postMessage({
-            type: 'CHATGPT_CONVERSATION_ERROR',
-            error: `Failed to fetch conversation: ${error.message}`,
-            conversationId: conversationId,
-            url: apiUrl,
-            timestamp: Date.now()
-          }, '*');
-        }
-      });
-    }
-    
-    // Start trying URLs
-    tryNextUrl();
-  });
+  function getCurrentConversationId() {
+    const match = window.location.pathname.match(/\/c\/([a-f0-9-]{36})/);
+    return match ? match[1] : null;
+  }
 }
 
-// Handle keyboard shortcuts and manual analysis
-chrome.commands.onCommand.addListener((command) => {
-  if (command === "toggle_overlay") {
-    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-      if (tabs[0] && tabs[0].url.includes("chatgpt.com")) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: "toggleOverlay"
-        });
-      }
-    });
-  }
-});
-
-// Handle manual analysis requests from popup or content script
+// Handle manual analysis with page reload
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "manualAnalysis" && sender.tab) {
     const tabId = sender.tab.id;
     const conversationId = extractConversationId(sender.tab.url);
     
     if (conversationId) {
-      console.log(`[ChatGPT Analyst] Manual analysis requested for conversation: ${conversationId}`);
+      console.log(`[ChatGPT Analyst] Manual analysis requested for: ${conversationId}`);
+      console.log(`[ChatGPT Analyst] Will reload page to capture fresh network traffic`);
       
-      // Try to fetch current conversation directly
+      // First, inject our interceptor
       chrome.scripting.executeScript({
         target: { tabId: tabId },
         world: 'MAIN',
-        func: interceptConversationResponse,
-        args: [`https://chatgpt.com/backend-api/conversation/${conversationId}`, conversationId, 'manual']
-      }).catch(error => {
-        console.warn('Could not inject manual analysis:', error);
-        sendResponse({ error: 'Failed to inject analysis script' });
+        func: setupNetworkInterception
       });
       
-      sendResponse({ success: true, conversationId: conversationId });
+      // Then reload the page after a short delay
+      setTimeout(() => {
+        chrome.tabs.reload(tabId);
+      }, 500);
+      
+      sendResponse({ success: true, conversationId: conversationId, action: 'reloading' });
     } else {
       sendResponse({ error: 'No conversation ID found in current URL' });
     }
     
-    return true; // Keep message channel open
+    return true;
+  }
+});
+
+// Function to setup network interception before page reload
+function setupNetworkInterception() {
+  console.log('[ChatGPT Analyst] Setting up network interception...');
+  
+  const conversationId = getCurrentConversationId();
+  if (!conversationId) return;
+  
+  console.log(`[ChatGPT Analyst] Will monitor for conversation: ${conversationId}`);
+  
+  // Store original fetch
+  const originalFetch = window.fetch;
+  
+  // Override fetch to monitor all requests
+  window.fetch = function(...args) {
+    const result = originalFetch.apply(this, args);
+    const url = args[0];
+    
+    // Monitor the result
+    result.then(response => {
+      if (response.ok && typeof url === 'string' && url.includes('/backend-api/')) {
+        
+        // Clone and check response
+        response.clone().json().then(data => {
+          if (isConversationData(data, conversationId)) {
+            console.log('[ChatGPT Analyst] 🎉 Found conversation data after reload!', {
+              url: url,
+              dataSize: JSON.stringify(data).length,
+              hasMapping: !!data.mapping,
+              mappingKeys: data.mapping ? Object.keys(data.mapping).length : 0,
+              title: data.title
+            });
+            
+            // Send success data
+            window.postMessage({
+              type: 'CHATGPT_CONVERSATION_DATA',
+              data: data,
+              conversationId: conversationId,
+              url: url,
+              timestamp: Date.now()
+            }, '*');
+            
+            // Restore fetch
+            window.fetch = originalFetch;
+          }
+        }).catch(() => {
+          // Not JSON, ignore
+        });
+      }
+    }).catch(() => {
+      // Request failed, ignore  
+    });
+    
+    return result;
+  };
+  
+  // Auto-restore after 15 seconds
+  setTimeout(() => {
+    window.fetch = originalFetch;
+  }, 15000);
+  
+  // Helper functions
+  function isConversationData(data, targetId) {
+    return data && 
+           data.mapping && 
+           Object.keys(data.mapping).length > 0 &&
+           (data.conversation_id === targetId || data.id === targetId || hasMessageStructure(data));
+  }
+  
+  function hasMessageStructure(data) {
+    if (!data.mapping) return false;
+    for (const nodeId in data.mapping) {
+      const node = data.mapping[nodeId];
+      if (node && node.message && node.message.content) {
+        return true;
+      }
+    }
+    return false;
+  }
+  
+  function getCurrentConversationId() {
+    const match = window.location.pathname.match(/\/c\/([a-f0-9-]{36})/);
+    return match ? match[1] : null;
+  }
+}
+
+// Handle keyboard shortcuts
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "toggle_overlay") {
+    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+      if (tabs[0] && tabs[0].url.includes("chatgpt.com")) {
+        chrome.tabs.sendMessage(tabs[0].id, {action: "toggleOverlay"});
+      }
+    });
   }
 });
 
 // Clean up when tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
-  delete activeAnalysis[tabId];
-  delete requestCounts[tabId];
-});
-
-// Reset badge when navigating away from ChatGPT
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.url && !changeInfo.url.includes("chatgpt.com")) {
-    chrome.action.setBadgeText({text: "", tabId: tabId});
-    delete activeAnalysis[tabId];
-    delete requestCounts[tabId];
-  }
+  delete capturedConversationData[tabId];
 });
 
 // Extract conversation ID from ChatGPT URL
@@ -400,4 +315,4 @@ function extractConversationId(url) {
   return match ? match[1] : null;
 }
 
-console.log("[ChatGPT Analyst] Background service worker loaded and monitoring network traffic"); 
+console.log("[ChatGPT Analyst] Simplified background service worker loaded"); 
