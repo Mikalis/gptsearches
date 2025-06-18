@@ -77,6 +77,14 @@ async function checkForNewData() {
           });
           
           setStatusProcessing();
+          
+          // Clear old data when switching conversations
+          if (currentConversationId !== lastConversationId) {
+            console.log('🧹 Clearing old conversation data - new conversation detected');
+            await chrome.storage.local.remove(['analysisData']);
+            showNotification('🆕 New conversation detected - clearing old data');
+          }
+          
           lastProcessedTimestamp = currentTimestamp;
           lastConversationId = currentConversationId;
         
@@ -96,7 +104,7 @@ async function checkForNewData() {
               title: result.conversationMetadata.title
             });
             
-            showNotification(`🎉 NEW: ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts!`);
+            showNotification(`🎉 NEW: ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts in current session!`);
             setStatusFound();
             displayAnalysisData();
             
@@ -128,7 +136,7 @@ async function checkForNewData() {
           reasoning: analysis.reasoning.length
         });
         
-        showNotification(`🎉 Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts!`);
+        showNotification(`🎉 Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts in current session!`);
         displayAnalysisData();
       }
     }
@@ -177,8 +185,11 @@ function createOverlay() {
   const refreshBtn = document.createElement('button');
   refreshBtn.className = 'control-btn refresh-btn';
   refreshBtn.innerHTML = '🔄';
-  refreshBtn.title = 'Refresh Analysis';
-  refreshBtn.addEventListener('click', handleRefreshClick);
+  refreshBtn.title = 'Refresh Page';
+  refreshBtn.addEventListener('click', () => {
+    showNotification('🔄 Refreshing page...');
+    setTimeout(() => window.location.reload(), 500);
+  });
   
   // Minimize button
   const minimizeBtn = document.createElement('button');
@@ -250,10 +261,13 @@ function extractSearchAndReasoning(conversationData) {
   result.metadata.conversationId = conversationData.conversation_id;
   result.metadata.totalMessages = Object.keys(mapping).length;
 
-  // Process each message in the conversation
-  Object.values(mapping).forEach((node, index) => {
-    if (!node.message) return;
-
+  // Process only recent messages (last 10) to show current session data
+  const allNodes = Object.values(mapping).filter(node => node.message);
+  const recentNodes = allNodes.slice(-10); // Only last 10 messages
+  
+  console.log(`📊 Processing ${recentNodes.length} recent messages (from ${allNodes.length} total)`);
+  
+  recentNodes.forEach((node, index) => {
     const message = node.message;
     const content = message.content;
     const metadata = message.metadata || {};
@@ -457,17 +471,17 @@ function createWelcomeMessage() {
         <h6>📋 How to Use:</h6>
         <ol>
           <li>Start or continue a ChatGPT conversation</li>
-          <li>The plugin automatically captures search queries and reasoning</li>
-          <li>Analysis appears here in real-time</li>
-          <li>Export data when ready</li>
+          <li>Plugin captures latest search queries & reasoning automatically</li>
+          <li>Only shows current conversation data (clears old data)</li>
+          <li>Export current session when ready</li>
         </ol>
       </div>
       <div class="action-buttons">
         <button class="primary-btn" data-action="force-analyze">
-          🔍 Force Analyze
+          🔍 Scan Now
         </button>
         <button class="btn-secondary" data-action="refresh-page">
-          🔄 Refresh Page
+          🔄 Refresh
         </button>
       </div>
     </div>
@@ -825,36 +839,13 @@ function showNotification(message) {
   }, 3000);
 }
 
-function handleRefreshClick() {
-  showNotification('🔄 Refreshing analysis data...');
-  console.log('🔄 Manual refresh triggered');
-  
-  // Clear current data and reload
-  chrome.storage.local.remove(['analysisData'], () => {
-    displayAnalysisData();
-    
-    // Try to trigger a new analysis after a short delay
-    setTimeout(() => {
-      chrome.storage.local.get(['conversationData'], (result) => {
-        if (result.conversationData) {
-          const analysis = extractSearchAndReasoning(result.conversationData);
-          chrome.storage.local.set({ analysisData: analysis }, () => {
-            displayAnalysisData();
-            showNotification('✅ Analysis refreshed!');
-          });
-        } else {
-          showNotification('ℹ️ No conversation data found');
-        }
-      });
-    }, 500);
-  });
-}
+// Removed redundant handleRefreshClick - now using direct refresh in button
 
 async function forceAnalyzeData() {
   try {
-    showNotification('🔍 Force analyzing all available data...');
+    showNotification('🔍 Scanning for conversation data...');
     setStatusProcessing();
-    console.log('🔍 Force analyze triggered');
+    console.log('🔍 Scan now triggered');
     
     // Get all storage data
     const allData = await chrome.storage.local.get(null);
@@ -907,7 +898,7 @@ async function forceAnalyzeData() {
       
       if (analysis.searchQueries.length > 0 || analysis.thoughts.length > 0 || 
           analysis.sources.length > 0 || analysis.reasoning.length > 0) {
-        showNotification(`🎉 Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
+        showNotification(`🎉 Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts in current session`);
         setStatusFound();
         displayAnalysisData();
         
