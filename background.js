@@ -477,7 +477,7 @@ function attachDebuggerAndStart(tabId, conversationId) {
           });
         }
       });
-    }, 30000);
+    }, 60000);
   });
 }
 
@@ -490,4 +490,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({success: true, message: 'Debugger capture initiated'});
     return true;
   }
+});
+
+// Listen for tab updates to detach debugger when needed
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // If the tab is loading a new page, detach debugger
+  if (changeInfo.status === 'loading') {
+    chrome.debugger.getTargets((targets) => {
+      const stillAttached = targets.some(target => 
+        target.tabId === tabId && target.attached);
+      
+      if (stillAttached) {
+        console.log('[ChatGPT Analyst] Tab navigating - detaching debugger from tab:', tabId);
+        chrome.debugger.detach({tabId});
+      }
+    });
+  }
+});
+
+// Listen for tab close to detach debugger
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.debugger.getTargets((targets) => {
+    const stillAttached = targets.some(target => 
+      target.tabId === tabId && target.attached);
+    
+    if (stillAttached) {
+      console.log('[ChatGPT Analyst] Tab closed - detaching debugger from tab:', tabId);
+      chrome.debugger.detach({tabId});
+    }
+  });
 }); 
