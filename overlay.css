@@ -1,3 +1,320 @@
+/* ChatGPT Analyst Overlay Styles */
+.chatgpt-analyst-overlay {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 350px;
+  max-height: 80vh;
+  background-color: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 10000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: #333;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+
+.chatgpt-analyst-overlay.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: all;
+}
+
+.chatgpt-analyst-overlay .overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: #10a37f;
+  color: white;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+}
+
+.chatgpt-analyst-overlay .overlay-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.chatgpt-analyst-overlay .overlay-title-icon {
+  margin-right: 8px;
+  font-size: 18px;
+}
+
+.chatgpt-analyst-overlay .overlay-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.chatgpt-analyst-overlay .overlay-button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.chatgpt-analyst-overlay .overlay-button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.chatgpt-analyst-overlay .overlay-content {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: calc(80vh - 120px);
+}
+
+.chatgpt-analyst-overlay .overlay-status {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: #666;
+  background-color: #f5f5f5;
+  border-top: 1px solid #eaeaea;
+  text-align: right;
+}
+
+.chatgpt-analyst-overlay .section {
+  margin-bottom: 20px;
+}
+
+.chatgpt-analyst-overlay .section-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #10a37f;
+  display: flex;
+  align-items: center;
+}
+
+.chatgpt-analyst-overlay .section-title-icon {
+  margin-right: 6px;
+}
+
+.chatgpt-analyst-overlay .item-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.chatgpt-analyst-overlay .list-item {
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  border-left: 3px solid #10a37f;
+}
+
+.chatgpt-analyst-overlay .list-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+
+.chatgpt-analyst-overlay .list-item-content {
+  color: #333;
+  word-break: break-word;
+}
+
+.chatgpt-analyst-overlay .list-item-timestamp {
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
+.chatgpt-analyst-overlay .metadata {
+  font-size: 11px;
+  color: #888;
+  background-color: #f5f5f5;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.chatgpt-analyst-overlay .metadata-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.chatgpt-analyst-overlay .metadata-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chatgpt-analyst-overlay .metadata-item {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.chatgpt-analyst-overlay .export-button {
+  background-color: #10a37f;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+  width: 100%;
+  transition: background-color 0.2s;
+}
+
+.chatgpt-analyst-overlay .export-button:hover {
+  background-color: #0d8a6c;
+}
+
+.chatgpt-analyst-overlay .loading-message,
+.chatgpt-analyst-overlay .error-message,
+.chatgpt-analyst-overlay .no-data {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.chatgpt-analyst-overlay .loading-message h4,
+.chatgpt-analyst-overlay .error-message h4,
+.chatgpt-analyst-overlay .no-data h4 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #333;
+}
+
+.chatgpt-analyst-overlay .error-message {
+  color: #e53935;
+}
+
+.chatgpt-analyst-overlay .error-message p {
+  color: #666;
+}
+
+.chatgpt-analyst-overlay .troubleshooting {
+  background-color: #f5f5f5;
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 16px;
+  text-align: left;
+}
+
+.chatgpt-analyst-overlay .troubleshooting h5 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.chatgpt-analyst-overlay .troubleshooting ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.chatgpt-analyst-overlay .error-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.chatgpt-analyst-overlay .retry-btn,
+.chatgpt-analyst-overlay .new-conversation-btn {
+  flex: 1;
+  padding: 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.chatgpt-analyst-overlay .retry-btn {
+  background-color: #10a37f;
+  color: white;
+}
+
+.chatgpt-analyst-overlay .new-conversation-btn {
+  background-color: #f5f5f5;
+  color: #333;
+}
+
+.chatgpt-analyst-overlay .debug-info {
+  margin-top: 16px;
+  font-size: 11px;
+  color: #888;
+}
+
+.chatgpt-analyst-overlay .debug-info summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.chatgpt-analyst-overlay .user-guidance {
+  background-color: #e8f4fd;
+  border-radius: 6px;
+  padding: 10px;
+  margin: 10px 0;
+  border-left: 3px solid #2196f3;
+}
+
+.chatgpt-analyst-overlay .user-guidance p {
+  margin: 0 0 8px 0;
+}
+
+.chatgpt-analyst-overlay .user-guidance ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.chatgpt-analyst-overlay .solution-steps {
+  background-color: #e8f5e9;
+  border-radius: 6px;
+  padding: 10px;
+  margin: 10px 0;
+  border-left: 3px solid #4caf50;
+}
+
+.chatgpt-analyst-overlay .solution-steps h6 {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.chatgpt-analyst-overlay .solution-steps ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.chatgpt-analyst-overlay .action-buttons {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.chatgpt-analyst-overlay .primary-btn {
+  background-color: #10a37f;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
 /* ChatGPT SEO Analyst - Overlay Styles */
 
 /* Main overlay container */

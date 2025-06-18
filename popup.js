@@ -1,292 +1,106 @@
-// ChatGPT SEO Analyst - Popup Script
-// Handles the popup interface and coordinates with background/content scripts
-
-let currentTab = null;
-let extensionSettings = {
-  autoShow: true,
-  monitoring: true
-};
-
-// DOM elements
-const elements = {
-  extensionStatus: document.getElementById('extension-status'),
-  pageStatus: document.getElementById('page-status'),
-  requestCount: document.getElementById('request-count'),
-  overlayStatus: document.getElementById('overlay-status'),
-  autoShowToggle: document.getElementById('auto-show-toggle'),
-  monitorToggle: document.getElementById('monitor-toggle'),
-  analyzeBtn: document.getElementById('analyze-conversation'),
-  toggleOverlayBtn: document.getElementById('toggle-overlay'),
-  clearDataBtn: document.getElementById('clear-data')
-};
-
-// Initialize popup when loaded
+// ChatGPT Analyst - Popup Script
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('[ChatGPT Analyst Popup] Initializing...');
-  initializePopup();
-  setupEventListeners();
-  updateStatus();
+  // DOM elements
+  const analyzeBtn = document.getElementById('analyze-btn');
+  const newConversationBtn = document.getElementById('new-conversation-btn');
+  const tipsHeader = document.getElementById('tips-header');
+  const tipsContent = document.getElementById('tips-content');
+  const settingsToggle = document.getElementById('settings-toggle');
+  const settingsContainer = document.getElementById('settings-container');
+  const autoAnalyzeToggle = document.getElementById('auto-analyze');
+  const showDebugToggle = document.getElementById('show-debug');
   
-  // Update status every 2 seconds
-  setInterval(updateStatus, 2000);
-});
-
-// Initialize popup state
-async function initializePopup() {
-  try {
-    // Get current active tab
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    currentTab = tabs[0];
-    
-    // Load saved settings
-    const result = await chrome.storage.local.get(['autoShow', 'monitoring']);
-    extensionSettings.autoShow = result.autoShow !== false; // Default to true
-    extensionSettings.monitoring = result.monitoring !== false; // Default to true
-    
-    // Update toggle switches
-    updateToggleSwitch(elements.autoShowToggle, extensionSettings.autoShow);
-    updateToggleSwitch(elements.monitorToggle, extensionSettings.monitoring);
-    
-    console.log('[ChatGPT Analyst Popup] Initialized with settings:', extensionSettings);
-    
-  } catch (error) {
-    console.error('[ChatGPT Analyst Popup] Initialization error:', error);
-    updateStatusElement(elements.extensionStatus, 'Error', false);
-  }
-}
-
-// Setup event listeners
-function setupEventListeners() {
-  // Toggle switches
-  elements.autoShowToggle.addEventListener('click', () => {
-    extensionSettings.autoShow = !extensionSettings.autoShow;
-    updateToggleSwitch(elements.autoShowToggle, extensionSettings.autoShow);
-    saveSettings();
-    sendMessageToContentScript({ action: 'updateSettings', settings: extensionSettings });
+  // Load settings from storage
+  chrome.storage.sync.get({
+    autoAnalyze: false,
+    showDebug: false
+  }, (items) => {
+    autoAnalyzeToggle.checked = items.autoAnalyze;
+    showDebugToggle.checked = items.showDebug;
   });
   
-  elements.monitorToggle.addEventListener('click', () => {
-    extensionSettings.monitoring = !extensionSettings.monitoring;
-    updateToggleSwitch(elements.monitorToggle, extensionSettings.monitoring);
-    saveSettings();
-    // Note: This would require reloading the page to take effect for webRequest listeners
-    if (!extensionSettings.monitoring) {
-      showTemporaryMessage('Monitoring disabled. Reload page to take effect.');
-    }
+  // Toggle tips visibility
+  tipsHeader.addEventListener('click', () => {
+    tipsContent.classList.toggle('visible');
+    tipsHeader.querySelector('.toggle-icon').textContent = 
+      tipsContent.classList.contains('visible') ? '▲' : '▼';
   });
   
-  // Action buttons
-  elements.analyzeBtn.addEventListener('click', async () => {
-    if (isChatGPTPage()) {
-      elements.analyzeBtn.textContent = '🔄 Analyzing...';
-      elements.analyzeBtn.disabled = true;
-      
-      try {
-        const response = await sendMessageToContentScript({ action: 'analyzeConversation' });
-        if (response && response.status === 'success') {
-          showTemporaryMessage('Analysis started! Check the overlay for results.');
-        } else {
-          showTemporaryMessage('Analysis failed. Make sure you\'re in a conversation.');
-        }
-      } catch (error) {
-        showTemporaryMessage('Analysis failed. Please try again.');
-      } finally {
-        elements.analyzeBtn.textContent = '🔍 Analyze Conversation';
-        elements.analyzeBtn.disabled = false;
+  // Toggle settings visibility
+  settingsToggle.addEventListener('click', () => {
+    settingsContainer.classList.toggle('visible');
+    settingsToggle.querySelector('.toggle-icon').textContent = 
+      settingsContainer.classList.contains('visible') ? '▲' : '▼';
+  });
+  
+  // Save settings when changed
+  autoAnalyzeToggle.addEventListener('change', () => {
+    chrome.storage.sync.set({ autoAnalyze: autoAnalyzeToggle.checked });
+    
+    // Send message to content script
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0 && tabs[0].url.includes('chatgpt.com')) {
+        chrome.tabs.sendMessage(tabs[0].id, { 
+          action: 'updateSettings', 
+          settings: { autoAnalyze: autoAnalyzeToggle.checked } 
+        });
       }
-    } else {
-      showTemporaryMessage('Please navigate to ChatGPT first.');
-    }
-  });
-  
-  elements.toggleOverlayBtn.addEventListener('click', () => {
-    if (isChatGPTPage()) {
-      sendMessageToContentScript({ action: 'toggleOverlay' });
-    } else {
-      showTemporaryMessage('Please navigate to ChatGPT first.');
-    }
-  });
-  
-  elements.clearDataBtn.addEventListener('click', () => {
-    if (isChatGPTPage()) {
-      sendMessageToContentScript({ action: 'clearData' });
-      showTemporaryMessage('Analysis data cleared.');
-    } else {
-      showTemporaryMessage('Please navigate to ChatGPT first.');
-    }
-  });
-}
-
-// Update overall status
-async function updateStatus() {
-  try {
-    // Check extension status
-    updateStatusElement(elements.extensionStatus, 'Active', true);
-    
-    // Check current page
-    if (currentTab) {
-      const isChatGPT = isChatGPTPage();
-      updateStatusElement(elements.pageStatus, isChatGPT ? 'ChatGPT' : 'Other Page', isChatGPT);
-      
-      // Update button states
-      elements.analyzeBtn.disabled = !isChatGPT;
-      elements.toggleOverlayBtn.disabled = !isChatGPT;
-      elements.clearDataBtn.disabled = !isChatGPT;
-      
-      if (isChatGPT) {
-        await updateChatGPTSpecificStatus();
-      } else {
-        updateStatusElement(elements.requestCount, '0', false);
-        updateStatusElement(elements.overlayStatus, 'N/A', false);
-      }
-    }
-    
-  } catch (error) {
-    console.error('[ChatGPT Analyst Popup] Status update error:', error);
-    updateStatusElement(elements.extensionStatus, 'Error', false);
-  }
-}
-
-// Update ChatGPT-specific status
-async function updateChatGPTSpecificStatus() {
-  try {
-    // Get badge text (request count)
-    const badgeText = await chrome.action.getBadgeText({ tabId: currentTab.id });
-    const requestCount = badgeText || '0';
-    updateStatusElement(elements.requestCount, requestCount, parseInt(requestCount) > 0);
-    
-    // Check overlay status by sending message to content script
-    const response = await sendMessageToContentScript({ action: 'getOverlayStatus' });
-    if (response && response.status === 'success') {
-      updateStatusElement(elements.overlayStatus, response.visible ? 'Visible' : 'Hidden', response.visible);
-    } else {
-      updateStatusElement(elements.overlayStatus, 'Unknown', false);
-    }
-    
-  } catch (error) {
-    console.warn('[ChatGPT Analyst Popup] Could not get ChatGPT status:', error);
-    updateStatusElement(elements.requestCount, 'Unknown', false);
-    updateStatusElement(elements.overlayStatus, 'Unknown', false);
-  }
-}
-
-// Send message to content script
-function sendMessageToContentScript(message) {
-  return new Promise((resolve) => {
-    if (!currentTab || !isChatGPTPage()) {
-      resolve({ status: 'error', message: 'Not on ChatGPT page' });
-      return;
-    }
-    
-    chrome.tabs.sendMessage(currentTab.id, message)
-      .then(resolve)
-      .catch(error => {
-        console.warn('[ChatGPT Analyst Popup] Message sending failed:', error);
-        resolve({ status: 'error', message: error.message });
-      });
-  });
-}
-
-// Utility functions
-function isChatGPTPage() {
-  return currentTab && currentTab.url && currentTab.url.includes('chatgpt.com');
-}
-
-function updateStatusElement(element, text, isActive) {
-  if (!element) return;
-  
-  element.textContent = text;
-  element.className = 'status-value' + (isActive ? '' : ' inactive');
-}
-
-function updateToggleSwitch(element, isActive) {
-  if (!element) return;
-  
-  if (isActive) {
-    element.classList.add('active');
-  } else {
-    element.classList.remove('active');
-  }
-}
-
-function saveSettings() {
-  chrome.storage.local.set(extensionSettings)
-    .then(() => {
-      console.log('[ChatGPT Analyst Popup] Settings saved:', extensionSettings);
-    })
-    .catch(error => {
-      console.error('[ChatGPT Analyst Popup] Failed to save settings:', error);
     });
-}
-
-function showTemporaryMessage(message, duration = 3000) {
-  // Create a temporary notification element
-  const notification = document.createElement('div');
-  notification.style.cssText = `
-    position: fixed;
-    top: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(76, 175, 80, 0.9);
-    color: white;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    z-index: 1000;
-    animation: slideDown 0.3s ease-out;
-  `;
-  notification.textContent = message;
+  });
   
-  // Add CSS animation
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideDown {
-      from { transform: translateX(-50%) translateY(-100%); opacity: 0; }
-      to { transform: translateX(-50%) translateY(0); opacity: 1; }
-    }
-  `;
-  document.head.appendChild(style);
+  showDebugToggle.addEventListener('change', () => {
+    chrome.storage.sync.set({ showDebug: showDebugToggle.checked });
+    
+    // Send message to content script
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0 && tabs[0].url.includes('chatgpt.com')) {
+        chrome.tabs.sendMessage(tabs[0].id, { 
+          action: 'updateSettings', 
+          settings: { showDebug: showDebugToggle.checked } 
+        });
+      }
+    });
+  });
   
-  document.body.appendChild(notification);
+  // Analyze conversation button
+  analyzeBtn.addEventListener('click', () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0 && tabs[0].url.includes('chatgpt.com')) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'analyzeConversation', manual: true });
+      } else {
+        showMessage('Please navigate to ChatGPT first');
+      }
+    });
+  });
   
-  setTimeout(() => {
-    notification.style.animation = 'slideDown 0.3s ease-out reverse';
+  // New conversation button
+  newConversationBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: 'https://chat.openai.com/chat' });
+  });
+  
+  // Show tips by default
+  tipsContent.classList.add('visible');
+  
+  // Helper function to show a message
+  function showMessage(message) {
+    const messageEl = document.createElement('div');
+    messageEl.textContent = message;
+    messageEl.style.cssText = `
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      right: 10px;
+      background: #10a37f;
+      color: white;
+      padding: 8px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 14px;
+      z-index: 1000;
+    `;
+    document.body.appendChild(messageEl);
     setTimeout(() => {
-      if (notification.parentNode) {
-        notification.parentNode.removeChild(notification);
-      }
-      if (style.parentNode) {
-        style.parentNode.removeChild(style);
-      }
-    }, 300);
-  }, duration);
-}
-
-// Handle tab changes
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  chrome.tabs.get(activeInfo.tabId)
-    .then(tab => {
-      currentTab = tab;
-      updateStatus();
-    })
-    .catch(console.error);
-});
-
-// Handle tab updates
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (currentTab && tabId === currentTab.id && changeInfo.url) {
-    currentTab = tab;
-    updateStatus();
+      document.body.removeChild(messageEl);
+    }, 3000);
   }
-});
-
-// Listen for messages from background script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'statusUpdate') {
-    updateStatus();
-    sendResponse({ status: 'success' });
-  }
-  return true;
-});
-
-console.log('[ChatGPT Analyst Popup] Script loaded and ready'); 
+}); 

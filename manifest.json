@@ -1,33 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "ChatGPT SEO Analyst",
+  "name": "ChatGPT Analyst",
   "version": "1.0.0",
-  "description": "Analyzes ChatGPT's network traffic to extract search queries and internal thoughts for SEO analysis.",
-  "permissions": [
-    "activeTab",
-    "scripting",
-    "webRequest",
-    "storage",
-    "debugger"
-  ],
-  "host_permissions": [
-    "https://chatgpt.com/*",
-    "https://*.chatgpt.com/*"
-  ],
-  "background": {
-    "service_worker": "background.js"
+  "description": "Extract search queries and internal reasoning from ChatGPT conversations",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
-  "content_scripts": [
-    {
-      "matches": ["https://chatgpt.com/*", "https://*.chatgpt.com/*"],
-      "js": ["content.js"],
-      "css": ["overlay.css"],
-      "run_at": "document_start"
-    }
-  ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "ChatGPT SEO Analyst",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -35,18 +18,27 @@
       "128": "icons/icon128.png"
     }
   },
-  "icons": {
-    "16": "icons/icon16.png",
-    "32": "icons/icon32.png", 
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
+  "permissions": [
+    "storage",
+    "tabs",
+    "debugger"
+  ],
+  "host_permissions": [
+    "https://chat.openai.com/*",
+    "https://chatgpt.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
   },
-  "commands": {
-    "toggle_overlay": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+S"
-      },
-      "description": "Toggle ChatGPT SEO analysis overlay"
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_idle"
     }
-  }
+  ]
 } 
