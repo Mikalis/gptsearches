@@ -498,6 +498,17 @@ window.addEventListener('message', (event) => {
         error: errorMessage,
         isConversationNotFound: isConversationNotFound
       });
+    } else if (event.data.type === 'TEST_OVERLAY') {
+      // Test the overlay system
+      console.log('[ChatGPT Analyst] Testing overlay display...');
+      showAnalysisResult({
+        hasData: true,
+        searchQueries: ['test query 1', 'test query 2'],
+        thoughts: ['test thought 1'],
+        reasoning: ['test reasoning 1'],
+        error: null,
+        isConversationNotFound: false
+      });
     }
   }
 });
@@ -1031,6 +1042,16 @@ async function initializeChatGPTAnalyst() {
 
 // Initialize when page is ready
 initializeChatGPTAnalyst();
+
+// Add global test function for debugging
+window.testChatGPTAnalystOverlay = function() {
+  console.log('[ChatGPT Analyst] Manual overlay test triggered');
+  window.postMessage({
+    type: 'TEST_OVERLAY'
+  }, '*');
+};
+
+console.log('[ChatGPT Analyst] Use window.testChatGPTAnalystOverlay() to test overlay');
 
 // Legacy functions removed - no longer needed with direct API approach
 // These functions violated CSP by injecting inline scripts

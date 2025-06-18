@@ -97,7 +97,7 @@ function interceptAnyConversationResponse(responseUrl, method) {
      const url = this.url;
      
      if (url && url.includes('/backend-api/conversation/') && 
-         url.includes(conversationId) && !foundData) {
+         url.includes(conversationId) && !url.includes('/textdocs') && !foundData) {
        
        console.log('[ChatGPT Analyst] 🎉 Intercepted Response.json() for:', url);
        
@@ -218,6 +218,17 @@ function interceptAnyConversationResponse(responseUrl, method) {
   
   // Helper function to check if data contains conversation
   function isConversationData(data, targetId) {
+    console.log('[ChatGPT Analyst] 🔍 Checking if data is conversation data:', {
+      hasData: !!data,
+      dataType: typeof data,
+      isObject: data && typeof data === 'object',
+      hasMapping: data && !!data.mapping,
+      mappingKeysCount: data && data.mapping ? Object.keys(data.mapping).length : 0,
+      conversationId: data && data.conversation_id,
+      id: data && data.id,
+      targetId: targetId
+    });
+    
     if (!data || typeof data !== 'object') return false;
     
     // Check for error responses first
@@ -234,13 +245,17 @@ function interceptAnyConversationResponse(responseUrl, method) {
     
     // Check if this is conversation data
     if (data.mapping && Object.keys(data.mapping).length > 0) {
+      console.log('[ChatGPT Analyst] Found mapping with keys:', Object.keys(data.mapping).length);
+      
       // Check if conversation ID matches exactly
       if (data.conversation_id === targetId) {
+        console.log('[ChatGPT Analyst] ✅ Conversation ID matches exactly');
         return true;
       }
       
       // Or check if URL contained the ID
       if (data.id === targetId) {
+        console.log('[ChatGPT Analyst] ✅ Data ID matches target ID');
         return true;
       }
       
@@ -251,11 +266,12 @@ function interceptAnyConversationResponse(responseUrl, method) {
       );
       
       if (hasValidMessages) {
-        console.log('[ChatGPT Analyst] Found conversation data with valid message structure');
+        console.log('[ChatGPT Analyst] ✅ Found conversation data with valid message structure');
         return true;
       }
     }
     
+    console.log('[ChatGPT Analyst] ❌ Data does not match conversation criteria');
     return false;
   }
   
