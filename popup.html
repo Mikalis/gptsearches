@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatGPT SEO Analyst</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 320px;
+            min-height: 400px;
+            background: linear-gradient(145deg, #1a1b26, #2d2f3f);
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+        }
+
+        .header {
+            background: linear-gradient(90deg, rgba(76, 175, 80, 0.2), rgba(76, 175, 80, 0.1));
+            padding: 16px;
+            border-bottom: 1px solid rgba(76, 175, 80, 0.3);
+        }
+
+        .header h1 {
+            font-size: 18px;
+            color: #4CAF50;
+            margin-bottom: 4px;
+        }
+
+        .header p {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .content {
+            padding: 16px;
+        }
+
+        .status-section {
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-label {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .status-value {
+            color: #4CAF50;
+            font-weight: 600;
+        }
+
+        .status-value.inactive {
+            color: #ff6b6b;
+        }
+
+        .controls-section {
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            color: #4CAF50;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .control-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+        }
+
+        .control-label {
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .toggle-switch.active {
+            background: #4CAF50;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+        }
+
+        .toggle-switch.active::after {
+            transform: translateX(20px);
+        }
+
+        .action-button {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 8px;
+        }
+
+        .action-button:hover {
+            background: linear-gradient(135deg, #45a049, #3d8b40);
+            transform: translateY(-1px);
+        }
+
+        .action-button:disabled {
+            background: rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.5);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .info-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 16px;
+        }
+
+        .info-title {
+            font-size: 14px;
+            color: #64B5F6;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.4;
+        }
+
+        .keyboard-shortcut {
+            background: rgba(76, 175, 80, 0.1);
+            border: 1px solid rgba(76, 175, 80, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 11px;
+            color: #4CAF50;
+        }
+
+        .footer {
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        .footer-text {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(76, 175, 80, 0.3);
+            border-radius: 50%;
+            border-top-color: #4CAF50;
+            animation: spin 0.8s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ChatGPT SEO Analyst</h1>
+        <p>Network traffic analysis for SEO insights</p>
+    </div>
+
+    <div class="content">
+        <div class="status-section">
+            <h2 class="section-title">Status</h2>
+            <div class="status-item">
+                <span class="status-label">Extension</span>
+                <span class="status-value" id="extension-status">
+                    <span class="loading"></span> Checking...
+                </span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Current Page</span>
+                <span class="status-value" id="page-status">Unknown</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Requests Monitored</span>
+                <span class="status-value" id="request-count">0</span>
+            </div>
+            <div class="status-item">
+                <span class="status-label">Overlay Visible</span>
+                <span class="status-value" id="overlay-status">Hidden</span>
+            </div>
+        </div>
+
+        <div class="controls-section">
+            <h2 class="section-title">Controls</h2>
+            <div class="control-item">
+                <span class="control-label">Auto-show overlay</span>
+                <div class="toggle-switch active" id="auto-show-toggle"></div>
+            </div>
+            <div class="control-item">
+                <span class="control-label">Monitor network</span>
+                <div class="toggle-switch active" id="monitor-toggle"></div>
+            </div>
+        </div>
+
+        <button class="action-button" id="toggle-overlay">
+            Toggle Overlay
+        </button>
+        
+        <button class="action-button" id="clear-data">
+            Clear Analysis Data
+        </button>
+
+        <div class="info-section">
+            <div class="info-title">💡 Quick Tips</div>
+            <div class="info-text">
+                • Use <span class="keyboard-shortcut">Ctrl+Shift+S</span> to quickly toggle the overlay<br>
+                • The extension automatically detects search queries and internal thoughts<br>
+                • Click the export button to copy analysis data to clipboard
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="footer-text">v1.0.0 | Monitoring ChatGPT network traffic</div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html> 
