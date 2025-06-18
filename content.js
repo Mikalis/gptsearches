@@ -43,9 +43,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[ChatGPT Analyst] Manual analysis requested from popup');
     analyzeConversationWithDebugger(true);
     sendResponse({ success: true });
+  } else if (message.action === 'makeApiRequest') {
+    // Handle API request from background script
+    console.log('[ChatGPT Analyst] Making API request for conversation:', message.conversationId);
+    makeDirectApiRequest(message.apiUrl, message.conversationId)
+      .then(result => {
+        console.log('[ChatGPT Analyst] API request completed:', result);
+        sendResponse({ success: true, result: result });
+      })
+      .catch(error => {
+        console.error('[ChatGPT Analyst] API request failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep response channel open for async response
   }
   
-  return false; // Don't keep the response channel open
+  return false; // Don't keep the response channel open for other messages
 });
 
 // Wait for page to be ready
@@ -572,18 +585,17 @@ function analyzeConversationWithDebugger(manual = false) {
   }
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
-  console.log('[ChatGPT Analyst] Will refresh page to capture network traffic...');
   
-  // Show reloading state
-  showAnalysisResult({
-    isReloading: true,
-    hasData: false,
-    searchQueries: [],
-    thoughts: [],
-    reasoning: []
-  });
+  // Try to load existing data from localStorage first
+  const existingData = loadAnalysisFromLocalStorage();
+  if (existingData && existingData.hasData && !manual) {
+    console.log('[ChatGPT Analyst] Using cached analysis data');
+    showAnalysisResult(existingData);
+    return;
+  }
   
   // Send message to background script to start debugger capture
+  console.log('[ChatGPT Analyst] Sending request to background script...');
   chrome.runtime.sendMessage({
     action: 'analyzeConversation',
     conversationId: conversationId,
@@ -591,20 +603,50 @@ function analyzeConversationWithDebugger(manual = false) {
   }).then(response => {
     console.log('[ChatGPT Analyst] Background script response:', response);
     
-    // Refresh the page to trigger network requests that the debugger can capture
+    // Set a timeout to check if we received data
     setTimeout(() => {
-      console.log('[ChatGPT Analyst] Refreshing page to capture fresh network traffic...');
-      window.location.reload();
-    }, 500);
+      if (!dataReceived) {
+        console.log('[ChatGPT Analyst] No data received yet, checking if page needs refresh...');
+        
+        // Try to make a direct API request to trigger network capture
+        const apiUrl = `https://chatgpt.com/backend-api/conversation/${conversationId}`;
+        fetch(apiUrl, {
+          headers: {
+            'Accept': 'application/json',
+          },
+          credentials: 'include'
+        }).then(response => {
+          console.log('[ChatGPT Analyst] Direct API request made to trigger capture');
+        }).catch(error => {
+          console.log('[ChatGPT Analyst] Direct API request failed, trying page refresh method...');
+          
+          // Show reloading state
+          showAnalysisResult({
+            isReloading: true,
+            hasData: false,
+            searchQueries: [],
+            thoughts: [],
+            reasoning: []
+          });
+          
+          // If direct request fails, reload page as fallback
+          setTimeout(() => {
+            console.log('[ChatGPT Analyst] Refreshing page to capture fresh network traffic...');
+            window.location.reload();
+          }, 1000);
+        });
+      }
+    }, 3000); // Wait 3 seconds for data
     
   }).catch(error => {
     console.log('[ChatGPT Analyst] Background script communication error:', error);
-    
-    // Fallback: refresh anyway
-    setTimeout(() => {
-      console.log('[ChatGPT Analyst] Refreshing page to capture fresh network traffic (fallback)...');
-      window.location.reload();
-    }, 500);
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      error: `Communication error with background script: ${error.message}`
+    });
   });
 }
 
@@ -1064,4 +1106,100 @@ function initializeExtension() {
   console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
   
   console.log('[ChatGPT Analyst] Extension initialized successfully');
+}
+
+// Make direct API request to fetch conversation data
+async function makeDirectApiRequest(apiUrl, conversationId) {
+  console.log('[ChatGPT Analyst] Making direct API request to:', apiUrl);
+  
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include'
+    });
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Conversation not found. This conversation may have expired or been deleted.');
+      } else if (response.status === 401) {
+        throw new Error('Authentication required. Please make sure you are logged in to ChatGPT.');
+      } else {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+    }
+    
+    const data = await response.json();
+    console.log('[ChatGPT Analyst] ✅ Direct API request successful:', {
+      url: apiUrl,
+      status: response.status,
+      hasMapping: !!data.mapping,
+      title: data.title || 'Untitled',
+      dataSize: JSON.stringify(data).length
+    });
+    
+    // Process the data immediately since we have it
+    const analysisData = extractSearchAndReasoning(data);
+    
+    if (analysisData.hasData) {
+      // Mark that we've received data
+      dataReceived = true;
+      
+      // Add API request info to metadata
+      analysisData.metadata.captureMethod = 'direct_api_request';
+      analysisData.metadata.captureUrl = apiUrl;
+      analysisData.metadata.captureTimestamp = new Date().toISOString();
+      
+      // Store current data
+      currentData = analysisData;
+      
+      // Save to localStorage for persistence
+      saveAnalysisToLocalStorage(analysisData);
+      
+      // Show results
+      showAnalysisResult(analysisData);
+    } else {
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        error: 'No search queries or internal reasoning found in this conversation. The conversation may not contain search-based interactions.',
+        metadata: {
+          captureMethod: 'direct_api_request',
+          captureUrl: apiUrl,
+          dataSize: JSON.stringify(data).length
+        }
+      });
+    }
+    
+    return {
+      success: true,
+      hasData: analysisData.hasData,
+      searchQueries: analysisData.searchQueries.length,
+      thoughts: analysisData.thoughts.length,
+      reasoning: analysisData.reasoning.length
+    };
+    
+  } catch (error) {
+    console.error('[ChatGPT Analyst] Direct API request failed:', error);
+    
+    const isConversationNotFound = error.message.includes('not found') || 
+                                   error.message.includes('404') ||
+                                   error.message.includes('expired');
+    
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      error: error.message,
+      isConversationNotFound: isConversationNotFound
+    });
+    
+    throw error;
+  }
 } 
