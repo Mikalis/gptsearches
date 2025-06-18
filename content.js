@@ -870,73 +870,144 @@ function extractSearchAndReasoning(data) {
     const mappingKeys = Object.keys(mapping);
     console.log('[ChatGPT Analyst] Found mapping with', mappingKeys.length, 'keys');
     
+    // Log first few mapping entries for debugging
+    console.log('[ChatGPT Analyst] 🔍 Mapping structure debug:', {
+      mappingKeys: mappingKeys.slice(0, 5),
+      firstEntry: mapping[mappingKeys[0]],
+      hasMessages: mappingKeys.filter(key => mapping[key]?.message).length
+    });
+    
     // Process each message in the mapping
     for (const key of mappingKeys) {
       const node = mapping[key];
       
       // Skip non-message nodes
-      if (!node || !node.message || node.message.author?.role !== 'assistant') {
+      if (!node || !node.message) {
         continue;
       }
       
       const message = node.message;
       const timestamp = new Date(message.create_time * 1000).toISOString();
+      const authorRole = message.author?.role;
       
-      // Extract search queries from tool calls
+      console.log('[ChatGPT Analyst] 🔍 Processing message:', {
+        key: key,
+        authorRole: authorRole,
+        hasContent: !!message.content,
+        contentLength: Array.isArray(message.content) ? message.content.length : 0,
+        hasMetadata: !!message.metadata,
+        hasToolCalls: !!message.tool_calls
+      });
+      
+      // Look for search queries in different places
+      
+      // 1. Check tool_calls for browser/search tools
       if (message.tool_calls && Array.isArray(message.tool_calls)) {
-        message.tool_calls.forEach(toolCall => {
+        message.tool_calls.forEach((toolCall, index) => {
+          console.log('[ChatGPT Analyst] 🛠️ Tool call:', {
+            index: index,
+            type: toolCall.type,
+            function: toolCall.function?.name,
+            browser: toolCall.browser,
+            allKeys: Object.keys(toolCall)
+          });
+          
           if (toolCall.type === 'browser' && toolCall.browser?.type === 'search') {
             result.searchQueries.push({
               query: toolCall.browser.query || toolCall.browser.text || toolCall.browser.input || '',
-              timestamp: timestamp
-            });
-            result.hasData = true;
-          }
-        });
-      }
-      
-      // Extract search queries from content blocks
-      if (message.content && Array.isArray(message.content)) {
-        message.content.forEach(content => {
-          // Check for browser_search content
-          if (content.browser_search) {
-            result.searchQueries.push({
-              query: content.browser_search.query || content.browser_search.text || '',
-              timestamp: timestamp
+              timestamp: timestamp,
+              source: 'tool_calls_browser'
             });
             result.hasData = true;
           }
           
-          // Check for tool_use content with search
+          // Check for function calls with search
+          if (toolCall.function && toolCall.function.name && 
+              (toolCall.function.name.includes('search') || toolCall.function.name.includes('browser'))) {
+            const args = toolCall.function.arguments || {};
+            if (args.query || args.search_query || args.q) {
+              result.searchQueries.push({
+                query: args.query || args.search_query || args.q,
+                timestamp: timestamp,
+                source: 'function_call_' + toolCall.function.name
+              });
+              result.hasData = true;
+            }
+          }
+        });
+      }
+      
+      // 2. Check content blocks for search-related content
+      if (message.content && Array.isArray(message.content)) {
+        message.content.forEach((content, index) => {
+          console.log('[ChatGPT Analyst] 📄 Content block:', {
+            index: index,
+            type: content.type,
+            contentType: content.content_type,
+            hasText: !!content.text,
+            hasBrowserSearch: !!content.browser_search,
+            hasToolUse: !!content.tool_use,
+            allKeys: Object.keys(content)
+          });
+          
+          // Browser search content
+          if (content.browser_search) {
+            result.searchQueries.push({
+              query: content.browser_search.query || content.browser_search.text || '',
+              timestamp: timestamp,
+              source: 'content_browser_search'
+            });
+            result.hasData = true;
+          }
+          
+          // Tool use content with search
           if (content.tool_use && content.tool_use.tool_name === 'browser' && 
               content.tool_use.tool_parameters && 
               (content.tool_use.tool_parameters.query || content.tool_use.tool_parameters.text)) {
             result.searchQueries.push({
               query: content.tool_use.tool_parameters.query || content.tool_use.tool_parameters.text || '',
-              timestamp: timestamp
+              timestamp: timestamp,
+              source: 'content_tool_use'
             });
             result.hasData = true;
+          }
+          
+          // Check for web search results
+          if (content.type === 'execution_output' && content.text && 
+              (content.text.includes('search') || content.text.includes('web'))) {
+            // Try to extract search query from execution output
+            const queryMatch = content.text.match(/search(?:ing|ed)?\s+for:?\s*["']?([^"'\n]+)["']?/i);
+            if (queryMatch) {
+              result.searchQueries.push({
+                query: queryMatch[1].trim(),
+                timestamp: timestamp,
+                source: 'execution_output'
+              });
+              result.hasData = true;
+            }
           }
         });
       }
       
-      // Extract internal thoughts
+      // 3. Extract internal thoughts from metadata
       if (message.metadata && message.metadata.thinking) {
         result.thoughts.push({
           thought: message.metadata.thinking,
-          timestamp: timestamp
+          timestamp: timestamp,
+          source: 'metadata_thinking'
         });
         result.hasData = true;
       }
       
-      // Extract reasoning from content blocks
+      // 4. Look for reasoning in various content blocks
       if (message.content && Array.isArray(message.content)) {
         message.content.forEach(content => {
           if (content.thinking_process || content.reasoning || 
               (content.text && content.text.includes('My reasoning:'))) {
             result.reasoning.push({
               reasoning: content.thinking_process || content.reasoning || content.text,
-              timestamp: timestamp
+              timestamp: timestamp,
+              source: 'content_reasoning'
             });
             result.hasData = true;
           }
@@ -944,60 +1015,56 @@ function extractSearchAndReasoning(data) {
       }
     }
     
-    // Look for search queries in the raw data as a fallback
+    // Enhanced fallback: Search for patterns in the raw JSON string
     const jsonString = JSON.stringify(data);
+    console.log('[ChatGPT Analyst] 🔍 Running enhanced pattern search on JSON...');
     
-    // Search for search patterns in the raw JSON
+    // More comprehensive search patterns
     const searchPatterns = [
       /"browser_search":\s*{\s*"query":\s*"([^"]+)"/g,
       /"browser":\s*{\s*"query":\s*"([^"]+)"/g,
       /"tool_use":\s*{\s*"tool_name":\s*"browser"[^}]*"query":\s*"([^"]+)"/g,
       /"search_query":\s*"([^"]+)"/g,
-      /"search":\s*{\s*"query":\s*"([^"]+)"/g
+      /"search":\s*{\s*"query":\s*"([^"]+)"/g,
+      /"function":\s*{\s*"name":\s*"[^"]*search[^"]*"[^}]*"arguments":\s*"[^"]*query[^"]*:\s*[^"]*"([^"]+)"/g,
+      /"query":\s*"([^"]+)"[^}]*"type":\s*"search"/g,
+      /searching\s+for:?\s*["']?([^"'\n\r]+)["']?/gi,
+      /web\s+search:?\s*["']?([^"'\n\r]+)["']?/gi
     ];
     
+    let patternMatches = 0;
     for (const pattern of searchPatterns) {
       let match;
       while ((match = pattern.exec(jsonString)) !== null) {
         const query = match[1];
-        if (query && !result.searchQueries.some(q => q.query === query)) {
+        if (query && query.trim() && !result.searchQueries.some(q => q.query === query.trim())) {
           result.searchQueries.push({
-            query: query,
+            query: query.trim(),
             timestamp: new Date().toISOString(),
-            source: 'pattern_match'
+            source: 'pattern_match_' + patternMatches
           });
           result.hasData = true;
+          patternMatches++;
         }
       }
     }
     
-    // Look for thinking patterns in the raw JSON
-    const thinkingPatterns = [
-      /"thinking":\s*"([^"]+)"/g,
-      /"thinking_process":\s*"([^"]+)"/g,
-      /"reasoning":\s*"([^"]+)"/g
-    ];
-    
-    for (const pattern of thinkingPatterns) {
-      let match;
-      while ((match = pattern.exec(jsonString)) !== null) {
-        const thought = match[1];
-        if (thought && !result.thoughts.some(t => t.thought === thought)) {
-          result.thoughts.push({
-            thought: thought,
-            timestamp: new Date().toISOString(),
-            source: 'pattern_match'
-          });
-          result.hasData = true;
-        }
-      }
-    }
+    console.log('[ChatGPT Analyst] Pattern search results:', {
+      patternsMatched: patternMatches,
+      totalQueries: result.searchQueries.length
+    });
     
     console.log('[ChatGPT Analyst] Extraction complete:', {
       searchQueries: result.searchQueries.length,
       thoughts: result.thoughts.length,
-      reasoning: result.reasoning.length
+      reasoning: result.reasoning.length,
+      hasData: result.hasData
     });
+    
+    // If we found queries, log them for debugging
+    if (result.searchQueries.length > 0) {
+      console.log('[ChatGPT Analyst] 🎉 Found search queries:', result.searchQueries);
+    }
     
   } catch (error) {
     console.error('[ChatGPT Analyst] Error extracting data:', error);
