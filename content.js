@@ -424,20 +424,42 @@ function showNotification(message, type = 'success') {
   }, 2000);
 }
 
+// Listen for intercepted conversation data from main world
+window.addEventListener('message', (event) => {
+  if (event.source === window && event.data.type === 'CHATGPT_CONVERSATION_DATA') {
+    console.log('[ChatGPT Analyst] Received intercepted conversation data:', event.data.url);
+    
+    try {
+      const conversationData = event.data.data;
+      console.log('[ChatGPT Analyst] Processing intercepted conversation data...');
+      
+      // Use existing analysis function to process the data
+      const analysisData = extractSearchAndReasoning(conversationData);
+      
+      if (analysisData.hasData) {
+        console.log('[ChatGPT Analyst] Found analysis data in intercepted response:', {
+          searchQueries: analysisData.searchQueries.length,
+          thoughts: analysisData.thoughts.length,
+          reasoning: analysisData.reasoning.length
+        });
+        showAnalysisResult(analysisData);
+      } else {
+        console.log('[ChatGPT Analyst] No analysis data found in intercepted response');
+      }
+      
+    } catch (error) {
+      console.error('[ChatGPT Analyst] Error processing intercepted data:', error);
+    }
+  }
+});
+
 // Message handler for background script communication
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('[ChatGPT Analyst] Received message:', request);
   
   switch (request.action) {
-    case 'analyzeResponse':
-      // Legacy handler - trigger analysis when we detect ChatGPT activity
-      console.log('[ChatGPT Analyst] Legacy analyze response triggered, using new direct approach');
-      analyzeCurrentConversation();
-      sendResponse({ status: 'success', timestamp: Date.now() });
-      break;
-      
     case 'analyzeConversation':
-      // Manual analysis trigger
+      // Manual analysis trigger - try direct API call as fallback
       analyzeCurrentConversation();
       sendResponse({ status: 'success', timestamp: Date.now() });
       break;
@@ -529,89 +551,11 @@ function getCurrentConversationId() {
   return match ? match[1] : null;
 }
 
-// Fetch conversation data directly from API
-async function fetchConversationData(conversationId) {
-  try {
-    const apiUrl = `https://chatgpt.com/backend-api/conversation/${conversationId}`;
-    console.log('[ChatGPT Analyst] Fetching conversation data from:', apiUrl);
-    
-    // Try to get CSRF token from meta tag or cookies
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || 
-                     getCookie('_csrf') || 
-                     getCookie('csrftoken');
-    
-    const headers = {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-    };
-    
-    // Add CSRF token if available
-    if (csrfToken) {
-      headers['X-CSRF-Token'] = csrfToken;
-    }
-    
-    // Try to get authorization token from localStorage
-    try {
-      const authToken = localStorage.getItem('auth_token') || 
-                       localStorage.getItem('access_token') ||
-                       sessionStorage.getItem('auth_token');
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-      }
-    } catch (e) {
-      // Ignore localStorage access errors
-    }
-    
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      credentials: 'include',
-      headers: headers,
-      cache: 'no-cache'
-    });
-    
-    if (!response.ok) {
-      // If 404, try alternative endpoint patterns
-      if (response.status === 404) {
-        console.log('[ChatGPT Analyst] Trying alternative API endpoint...');
-        const alternativeUrl = `https://chatgpt.com/backend-api/conversations/${conversationId}`;
-        const altResponse = await fetch(alternativeUrl, {
-          method: 'GET',
-          credentials: 'include',
-          headers: headers,
-          cache: 'no-cache'
-        });
-        
-        if (altResponse.ok) {
-          const data = await altResponse.json();
-          console.log('[ChatGPT Analyst] Successfully fetched conversation data from alternative endpoint');
-          return data;
-        }
-      }
-      
-      throw new Error(`HTTP ${response.status}: ${response.statusText || 'API endpoint not accessible'}`);
-    }
-    
-    const data = await response.json();
-    console.log('[ChatGPT Analyst] Successfully fetched conversation data');
-    return data;
-    
-  } catch (error) {
-    console.error('[ChatGPT Analyst] Error fetching conversation data:', error);
-    throw error;
-  }
-}
+// Network interception approach - no longer need direct API calls
 
-// Helper function to get cookie value
-function getCookie(name) {
-  const value = `; ${document.cookie}`;
-  const parts = value.split(`; ${name}=`);
-  if (parts.length === 2) return parts.pop().split(';').shift();
-  return null;
-}
-
-// Main function to analyze current conversation
-async function analyzeCurrentConversation() {
-  console.log('[ChatGPT Analyst] Starting conversation analysis...');
+// Simplified function to trigger analysis (now relies on network interception)
+function analyzeCurrentConversation() {
+  console.log('[ChatGPT Analyst] Manual analysis requested...');
   
   const conversationId = getCurrentConversationId();
   
@@ -622,53 +566,22 @@ async function analyzeCurrentConversation() {
       searchQueries: [],
       thoughts: [],
       reasoning: [],
-      error: 'Not in a ChatGPT conversation'
+      error: 'Not in a ChatGPT conversation. Please navigate to a ChatGPT conversation first.'
     });
     return;
   }
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
+  console.log('[ChatGPT Analyst] Waiting for network traffic to be intercepted...');
   
-  try {
-    // Show loading state
-    showAnalysisResult({
-      hasData: false,
-      searchQueries: [],
-      thoughts: [],
-      reasoning: [],
-      isLoading: true
-    });
-    
-    // Fetch conversation data
-    const conversationData = await fetchConversationData(conversationId);
-    
-    // Extract search queries and reasoning from the conversation
-    const analysisData = extractSearchAndReasoning(conversationData);
-    
-    if (analysisData.hasData) {
-      console.log('[ChatGPT Analyst] Analysis found data:', analysisData);
-      showAnalysisResult(analysisData);
-    } else {
-      console.log('[ChatGPT Analyst] No search queries or reasoning found in conversation');
-      showAnalysisResult({
-        hasData: false,
-        searchQueries: [],
-        thoughts: [],
-        reasoning: [],
-        error: 'No search queries or internal reasoning found in this conversation'
-      });
-    }
-    
-  } catch (error) {
-    console.error('[ChatGPT Analyst] Error analyzing conversation:', error);
-    showAnalysisResult({
-      hasData: false,
-      searchQueries: [],
-      thoughts: [],
-      reasoning: [],
-      error: `Failed to fetch conversation data: ${error.message}`
-    });
-  }
+  // Show waiting state - data will come from network interception
+  showAnalysisResult({
+    hasData: false,
+    searchQueries: [],
+    thoughts: [],
+    reasoning: [],
+    isWaiting: true
+  });
 }
 
 // Extract search queries and reasoning from conversation data
@@ -785,6 +698,18 @@ function showAnalysisResult(analysisData) {
       <div class="loading-message">
         <h4>🔄 Analyzing Conversation...</h4>
         <p>Fetching conversation data from ChatGPT API...</p>
+      </div>
+    `;
+    addPromotionalContent(contentDiv);
+    showOverlay();
+    return;
+  } else if (analysisData.isWaiting) {
+    statusDiv.textContent = 'Waiting for network traffic...';
+    contentDiv.innerHTML = `
+      <div class="loading-message">
+        <h4>🔍 Monitoring Network Traffic...</h4>
+        <p>Waiting for ChatGPT to make API requests...</p>
+        <p><small>Ask ChatGPT a question or reload the conversation to trigger network activity.</small></p>
       </div>
     `;
     addPromotionalContent(contentDiv);
