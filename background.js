@@ -60,15 +60,49 @@ chrome.webRequest.onCompleted.addListener(
       console.log(`[ChatGPT Analyst] Detected conversation data request: ${details.url}`);
       console.log(`[ChatGPT Analyst] Conversation ID: ${conversationMatch[1]}, Status: ${details.statusCode}`);
       
-      // Try to intercept regardless of status code (manual fetch might work even if automated failed)
-      chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        world: 'MAIN',
-        func: interceptConversationResponse,
-        args: [details.url, conversationMatch[1]]
-      }).catch(error => {
-        console.warn('Could not inject response interceptor:', error);
-      });
+      // Only try to intercept successful requests (200) and client errors that might work with auth (401, 403)
+      if (details.statusCode === 200) {
+        console.log(`[ChatGPT Analyst] Successful request - attempting interception`);
+        chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          world: 'MAIN',
+          func: interceptConversationResponse,
+          args: [details.url, conversationMatch[1], details.statusCode]
+        }).catch(error => {
+          console.warn('Could not inject response interceptor:', error);
+        });
+      } else if (details.statusCode === 404) {
+        console.log(`[ChatGPT Analyst] 404 Error - conversation doesn't exist or has expired: ${conversationMatch[1]}`);
+        // Send error to content script without trying to re-fetch
+        chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          world: 'MAIN',
+          func: notifyConversationError,
+          args: [conversationMatch[1], `Conversation not found (404). This conversation may have expired or been deleted.`]
+        }).catch(error => {
+          console.warn('Could not inject error notification:', error);
+        });
+      } else if (details.statusCode === 401 || details.statusCode === 403) {
+        console.log(`[ChatGPT Analyst] Auth error (${details.statusCode}) - attempting interception with better auth`);
+        chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          world: 'MAIN',
+          func: interceptConversationResponse,
+          args: [details.url, conversationMatch[1], details.statusCode]
+        }).catch(error => {
+          console.warn('Could not inject response interceptor:', error);
+        });
+      } else {
+        console.log(`[ChatGPT Analyst] HTTP ${details.statusCode} - skipping interception attempt`);
+        chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          world: 'MAIN',
+          func: notifyConversationError,
+          args: [conversationMatch[1], `HTTP ${details.statusCode}: ${details.statusCode === 500 ? 'Server error' : 'Request failed'}`]
+        }).catch(error => {
+          console.warn('Could not inject error notification:', error);
+        });
+      }
       
       // Update badge for detected conversation requests
       requestCounts[tabId] = (requestCounts[tabId] || 0) + 1;
@@ -98,10 +132,24 @@ chrome.webRequest.onCompleted.addListener(
   ["responseHeaders"]
 );
 
+// Function to notify of conversation errors without attempting fetch
+function notifyConversationError(conversationId, errorMessage) {
+  console.log('[ChatGPT Analyst] Conversation error:', errorMessage);
+  
+  // Send error info to content script
+  window.postMessage({
+    type: 'CHATGPT_CONVERSATION_ERROR',
+    error: errorMessage,
+    conversationId: conversationId,
+    timestamp: Date.now()
+  }, '*');
+}
+
 // Function to inject into main world to intercept responses
-function interceptConversationResponse(apiUrl, conversationId) {
+function interceptConversationResponse(apiUrl, conversationId, originalStatusCode) {
   // This runs in the main world context, so it has access to the same fetch context as ChatGPT
   console.log('[ChatGPT Analyst] Injected interceptor for:', apiUrl);
+  console.log('[ChatGPT Analyst] Original request status:', originalStatusCode);
   
   // Get the authorization token from various sources
   let authToken = null;
@@ -191,6 +239,13 @@ function interceptConversationResponse(apiUrl, conversationId) {
   }
   
   console.log('[ChatGPT Analyst] Fetching with headers:', Object.keys(headers));
+  console.log('[ChatGPT Analyst] Request details:', {
+    url: apiUrl,
+    conversationId: conversationId,
+    originalStatus: originalStatusCode,
+    hasAuth: !!authToken,
+    method: 'GET'
+  });
   
   // Try to re-fetch the same URL that just completed with proper headers
   fetch(apiUrl, {
@@ -202,14 +257,40 @@ function interceptConversationResponse(apiUrl, conversationId) {
     referrerPolicy: 'strict-origin-when-cross-origin'
   })
   .then(response => {
-    console.log('[ChatGPT Analyst] Response status:', response.status);
+    console.log('[ChatGPT Analyst] Fetch response:', {
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+    
     if (response.ok) {
       return response.json();
     }
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    
+    // Provide more detailed error info
+    let errorDetail = `HTTP ${response.status}: ${response.statusText}`;
+    if (response.status === 404) {
+      errorDetail += ' - This conversation may have expired, been deleted, or never existed.';
+    } else if (response.status === 401) {
+      errorDetail += ' - Authentication required. Please make sure you are logged into ChatGPT.';
+    } else if (response.status === 403) {
+      errorDetail += ' - Access forbidden. You may not have permission to view this conversation.';
+    } else if (response.status === 429) {
+      errorDetail += ' - Rate limited. Please wait a moment and try again.';
+    } else if (response.status >= 500) {
+      errorDetail += ' - Server error. ChatGPT may be experiencing issues.';
+    }
+    
+    throw new Error(errorDetail);
   })
   .then(data => {
-    console.log('[ChatGPT Analyst] Successfully intercepted conversation data');
+    console.log('[ChatGPT Analyst] Successfully intercepted conversation data:', {
+      dataSize: JSON.stringify(data).length,
+      hasMapping: !!data.mapping,
+      mappingKeys: data.mapping ? Object.keys(data.mapping).length : 0,
+      title: data.title
+    });
     
     // Send data to content script via window.postMessage
     window.postMessage({
@@ -222,6 +303,14 @@ function interceptConversationResponse(apiUrl, conversationId) {
   })
   .catch(error => {
     console.warn('[ChatGPT Analyst] Could not intercept conversation data:', error);
+    console.warn('[ChatGPT Analyst] Debugging info:', {
+      originalUrl: apiUrl,
+      conversationId: conversationId,
+      originalStatus: originalStatusCode,
+      currentUrl: window.location.href,
+      userAgent: navigator.userAgent,
+      cookieCount: document.cookie.split(';').length
+    });
     
     // Send error info to content script
     window.postMessage({
@@ -234,7 +323,7 @@ function interceptConversationResponse(apiUrl, conversationId) {
   });
 }
 
-// Handle keyboard shortcuts
+// Handle keyboard shortcuts and manual analysis
 chrome.commands.onCommand.addListener((command) => {
   if (command === "toggle_overlay") {
     chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
@@ -244,6 +333,35 @@ chrome.commands.onCommand.addListener((command) => {
         });
       }
     });
+  }
+});
+
+// Handle manual analysis requests from popup or content script
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "manualAnalysis" && sender.tab) {
+    const tabId = sender.tab.id;
+    const conversationId = extractConversationId(sender.tab.url);
+    
+    if (conversationId) {
+      console.log(`[ChatGPT Analyst] Manual analysis requested for conversation: ${conversationId}`);
+      
+      // Try to fetch current conversation directly
+      chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        world: 'MAIN',
+        func: interceptConversationResponse,
+        args: [`https://chatgpt.com/backend-api/conversation/${conversationId}`, conversationId, 'manual']
+      }).catch(error => {
+        console.warn('Could not inject manual analysis:', error);
+        sendResponse({ error: 'Failed to inject analysis script' });
+      });
+      
+      sendResponse({ success: true, conversationId: conversationId });
+    } else {
+      sendResponse({ error: 'No conversation ID found in current URL' });
+    }
+    
+    return true; // Keep message channel open
   }
 });
 

@@ -578,7 +578,7 @@ function getCurrentConversationId() {
 
 // Network interception approach - no longer need direct API calls
 
-// Simplified function to trigger analysis (now relies on network interception)
+// Improved function to trigger analysis with fallback methods
 function analyzeCurrentConversation() {
   console.log('[ChatGPT Analyst] Manual analysis requested...');
   
@@ -597,15 +597,60 @@ function analyzeCurrentConversation() {
   }
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
-  console.log('[ChatGPT Analyst] Waiting for network traffic to be intercepted...');
   
-  // Show waiting state - data will come from network interception
+  // Show loading state
   showAnalysisResult({
     hasData: false,
     searchQueries: [],
     thoughts: [],
     reasoning: [],
-    isWaiting: true
+    isLoading: true
+  });
+  
+  // Request manual analysis from background script
+  chrome.runtime.sendMessage({
+    action: "manualAnalysis",
+    conversationId: conversationId
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('[ChatGPT Analyst] Extension communication error:', chrome.runtime.lastError);
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        error: 'Extension communication error. Please reload the page and try again.'
+      });
+      return;
+    }
+    
+    if (response && response.error) {
+      console.error('[ChatGPT Analyst] Manual analysis error:', response.error);
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        error: response.error
+      });
+      return;
+    }
+    
+    console.log('[ChatGPT Analyst] Manual analysis initiated, waiting for response...');
+    
+    // Set a timeout to show waiting state if no response comes quickly
+    setTimeout(() => {
+      if (currentData && currentData.isLoading) {
+        console.log('[ChatGPT Analyst] Switching to waiting mode...');
+        showAnalysisResult({
+          hasData: false,
+          searchQueries: [],
+          thoughts: [],
+          reasoning: [],
+          isWaiting: true
+        });
+      }
+    }, 3000);
   });
 }
 
@@ -734,7 +779,16 @@ function showAnalysisResult(analysisData) {
       <div class="loading-message">
         <h4>🔍 Monitoring Network Traffic...</h4>
         <p>Waiting for ChatGPT to make API requests...</p>
-        <p><small>Ask ChatGPT a question or reload the conversation to trigger network activity.</small></p>
+        <div class="user-guidance">
+          <p><strong>Try these actions to trigger network activity:</strong></p>
+          <ul>
+            <li>Ask ChatGPT a new question</li>
+            <li>Refresh the conversation (F5)</li>
+            <li>Navigate to a different active conversation</li>
+            <li>Start a new conversation with a research-oriented question</li>
+          </ul>
+        </div>
+        <p><small><strong>Current conversation ID:</strong> ${getCurrentConversationId()}</small></p>
       </div>
     `;
     addPromotionalContent(contentDiv);
@@ -742,11 +796,61 @@ function showAnalysisResult(analysisData) {
     return;
   } else if (analysisData.error) {
     statusDiv.textContent = `Error: ${analysisData.error}`;
+    
+    let troubleshootingTips = '';
+    if (analysisData.error.includes('404')) {
+      troubleshootingTips = `
+        <div class="troubleshooting">
+          <h5>💡 Troubleshooting Tips:</h5>
+          <ul>
+            <li>This conversation may have expired or been deleted</li>
+            <li>Try starting a new conversation</li>
+            <li>Navigate to an existing active conversation</li>
+            <li>Check if you're still logged into ChatGPT</li>
+          </ul>
+        </div>
+      `;
+    } else if (analysisData.error.includes('401') || analysisData.error.includes('403')) {
+      troubleshootingTips = `
+        <div class="troubleshooting">
+          <h5>🔑 Authentication Issue:</h5>
+          <ul>
+            <li>Please make sure you're logged into ChatGPT</li>
+            <li>Try refreshing the page (F5)</li>
+            <li>Log out and back into ChatGPT</li>
+            <li>Clear browser cache and cookies for chatgpt.com</li>
+          </ul>
+        </div>
+      `;
+    } else if (analysisData.error.includes('communication error')) {
+      troubleshootingTips = `
+        <div class="troubleshooting">
+          <h5>🔧 Extension Issue:</h5>
+          <ul>
+            <li>Reload this page (F5)</li>
+            <li>Disable and re-enable the extension</li>
+            <li>Check if other extensions are interfering</li>
+            <li>Try opening ChatGPT in an incognito window</li>
+          </ul>
+        </div>
+      `;
+    }
+    
     contentDiv.innerHTML = `
       <div class="error-message">
         <h4>⚠️ Analysis Error</h4>
         <p>${escapeHtml(analysisData.error)}</p>
-        <button class="retry-btn" data-action="analyze">🔄 Retry Analysis</button>
+        ${troubleshootingTips}
+        <div class="error-actions">
+          <button class="retry-btn" data-action="analyze">🔄 Retry Analysis</button>
+          <button class="new-conversation-btn" onclick="window.open('https://chatgpt.com/', '_blank')">💬 New Conversation</button>
+        </div>
+        <details class="debug-info">
+          <summary>🔍 Debug Information</summary>
+          <p><small><strong>Current URL:</strong> ${window.location.href}</small></p>
+          <p><small><strong>Conversation ID:</strong> ${getCurrentConversationId() || 'Not found'}</small></p>
+          <p><small><strong>Timestamp:</strong> ${new Date().toISOString()}</small></p>
+        </details>
       </div>
     `;
     addPromotionalContent(contentDiv);
