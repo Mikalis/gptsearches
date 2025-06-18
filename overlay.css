@@ -637,4 +637,112 @@
       0 0 0 1px rgba(255, 255, 255, 0.1),
       inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
+}
+
+/* Enhanced styling for troubleshooting and guidance */
+.troubleshooting {
+  background: rgba(75, 85, 99, 0.3);
+  border: 1px solid rgba(75, 85, 99, 0.5);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.troubleshooting h5 {
+  margin: 0 0 8px 0;
+  color: #fbbf24;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.troubleshooting ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.troubleshooting li {
+  margin: 4px 0;
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.user-guidance {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.user-guidance p {
+  margin: 0 0 8px 0;
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.user-guidance ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.user-guidance li {
+  margin: 4px 0;
+  color: #dbeafe;
+  font-size: 13px;
+}
+
+.error-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+
+.new-conversation-btn {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.new-conversation-btn:hover {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: translateY(-1px);
+}
+
+.debug-info {
+  margin-top: 16px;
+  border-top: 1px solid rgba(75, 85, 99, 0.3);
+  padding-top: 12px;
+}
+
+.debug-info summary {
+  cursor: pointer;
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.debug-info summary:hover {
+  color: #d1d5db;
+}
+
+.debug-info p {
+  margin: 4px 0;
+  font-family: 'Courier New', monospace;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+  font-size: 11px;
+  color: #d1d5db;
 } 

@@ -581,6 +581,7 @@ function getCurrentConversationId() {
 // Improved function to trigger analysis with fallback methods
 function analyzeCurrentConversation() {
   console.log('[ChatGPT Analyst] Manual analysis requested...');
+  console.log('[ChatGPT Analyst] Current URL:', window.location.href);
   
   const conversationId = getCurrentConversationId();
   
@@ -597,6 +598,7 @@ function analyzeCurrentConversation() {
   }
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
+  console.log('[ChatGPT Analyst] User workflow: Go to ChatGPT -> Make prompt with search -> Open network tab -> Copy ID -> Refresh page -> Search for ID in network tab');
   
   // Show loading state
   showAnalysisResult({
