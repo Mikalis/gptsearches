@@ -707,11 +707,17 @@ function processNetworkData(networkData) {
       dataType: typeof data
     });
     
-    // Mark that we've received data
-    dataReceived = true;
-    
     // Use existing analysis function to process the conversation data
     const analysisData = extractSearchAndReasoning(data);
+    
+    console.log('[ChatGPT Analyst] 📊 Final extraction results:', {
+      hasData: analysisData.hasData,
+      searchQueries: analysisData.searchQueries.length,
+      thoughts: analysisData.thoughts.length,
+      reasoning: analysisData.reasoning.length,
+      queries: analysisData.searchQueries.map(q => q.query),
+      thoughtSummaries: analysisData.thoughts.map(t => t.thought)
+    });
     
     if (analysisData.hasData) {
       console.log('[ChatGPT Analyst] ✅ Found analysis data in network response:', {
@@ -725,13 +731,20 @@ function processNetworkData(networkData) {
       analysisData.metadata.captureMethod = networkData.source;
       analysisData.metadata.captureUrl = networkData.url;
       analysisData.metadata.captureTimestamp = new Date(networkData.timestamp).toISOString();
+      analysisData.metadata.conversationId = networkData.conversationId;
+      
+      // Mark that we've received data
+      dataReceived = true;
       
       // Store current data
       currentData = analysisData;
       
-      // Save to localStorage for persistence across page reloads
+      // FIRST: Save to localStorage for persistence
+      console.log('[ChatGPT Analyst] 💾 Saving analysis data to localStorage...');
       saveAnalysisToLocalStorage(analysisData);
       
+      // THEN: Display the results
+      console.log('[ChatGPT Analyst] 🖥️ Displaying analysis results in overlay...');
       showAnalysisResult(analysisData);
       
     } else {
@@ -746,7 +759,8 @@ function processNetworkData(networkData) {
           captureMethod: networkData.source,
           captureUrl: networkData.url,
           dataSize: JSON.stringify(data).length,
-          dataStructure: Object.keys(data)
+          dataStructure: Object.keys(data),
+          conversationId: networkData.conversationId
         }
       });
     }
@@ -945,8 +959,10 @@ function extractSearchAndReasoning(data) {
             type: content.type,
             contentType: content.content_type,
             hasText: !!content.text,
+            text: content.text ? content.text.substring(0, 100) + '...' : null,
             hasBrowserSearch: !!content.browser_search,
             hasToolUse: !!content.tool_use,
+            hasThoughts: !!content.thoughts,
             allKeys: Object.keys(content)
           });
           
@@ -972,6 +988,45 @@ function extractSearchAndReasoning(data) {
             result.hasData = true;
           }
           
+          // Check for code content with search() function calls
+          if (content.content_type === 'code' && content.text) {
+            const searchMatch = content.text.match(/search\s*\(\s*["']([^"']+)["']\s*\)/);
+            if (searchMatch) {
+              result.searchQueries.push({
+                query: searchMatch[1],
+                timestamp: timestamp,
+                source: 'code_search_function'
+              });
+              result.hasData = true;
+              console.log('[ChatGPT Analyst] 🎯 Found search() function call:', searchMatch[1]);
+            }
+          }
+          
+          // Check for thoughts content
+          if (content.content_type === 'thoughts' && content.thoughts && Array.isArray(content.thoughts)) {
+            content.thoughts.forEach(thought => {
+              if (thought.summary) {
+                result.thoughts.push({
+                  thought: thought.summary,
+                  detail: thought.content,
+                  timestamp: timestamp,
+                  source: 'thoughts_summary'
+                });
+                result.hasData = true;
+                console.log('[ChatGPT Analyst] 🧠 Found thought summary:', thought.summary);
+              }
+              if (thought.content) {
+                result.reasoning.push({
+                  reasoning: thought.content,
+                  timestamp: timestamp,
+                  source: 'thoughts_content'
+                });
+                result.hasData = true;
+                console.log('[ChatGPT Analyst] 🧠 Found thought content:', thought.content.substring(0, 100) + '...');
+              }
+            });
+          }
+          
           // Check for web search results
           if (content.type === 'execution_output' && content.text && 
               (content.text.includes('search') || content.text.includes('web'))) {
@@ -987,9 +1042,31 @@ function extractSearchAndReasoning(data) {
             }
           }
         });
+      } else if (message.content && message.content.content_type === 'text' && message.content.parts && Array.isArray(message.content.parts)) {
+        // Handle the parts array format
+        message.content.parts.forEach(part => {
+          if (typeof part === 'string' && part.includes('search')) {
+            console.log('[ChatGPT Analyst] 📄 Found text part with search:', part.substring(0, 100) + '...');
+          }
+        });
       }
       
-      // 3. Extract internal thoughts from metadata
+      // 3. Extract search queries from metadata.search_queries
+      if (message.metadata && message.metadata.search_queries && Array.isArray(message.metadata.search_queries)) {
+        message.metadata.search_queries.forEach(searchQuery => {
+          if (searchQuery.q) {
+            result.searchQueries.push({
+              query: searchQuery.q,
+              timestamp: timestamp,
+              source: 'metadata_search_queries'
+            });
+            result.hasData = true;
+            console.log('[ChatGPT Analyst] 🎯 Found metadata search query:', searchQuery.q);
+          }
+        });
+      }
+      
+      // 4. Extract internal thoughts from metadata
       if (message.metadata && message.metadata.thinking) {
         result.thoughts.push({
           thought: message.metadata.thinking,
@@ -999,7 +1076,7 @@ function extractSearchAndReasoning(data) {
         result.hasData = true;
       }
       
-      // 4. Look for reasoning in various content blocks
+      // 5. Look for reasoning in various content blocks
       if (message.content && Array.isArray(message.content)) {
         message.content.forEach(content => {
           if (content.thinking_process || content.reasoning || 
