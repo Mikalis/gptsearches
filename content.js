@@ -16,17 +16,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Try to extract conversation data from page
       const conversationData = extractConversationFromPage();
       
-      if (conversationData) {
-        // Save to storage for popup to access
-        chrome.storage.local.set({ 
-          conversationData: conversationData,
-          conversationMetadata: {
-            timestamp: new Date().toISOString(),
-            source: 'page_extraction',
-            conversationId: conversationData.conversation_id || 'unknown',
-            title: conversationData.title || 'Page Extracted Conversation'
-          }
-        });
+             if (conversationData) {
+         const newConversationId = conversationData.conversation_id || 'unknown';
+         
+         // Check if this is a different conversation and clear old data
+         chrome.storage.local.get(['conversationMetadata'], (existingData) => {
+           const previousConversationId = existingData.conversationMetadata?.conversationId;
+           
+           const dataToSet = {
+             conversationData: conversationData,
+             conversationMetadata: {
+               timestamp: new Date().toISOString(),
+               source: 'page_extraction',
+               conversationId: newConversationId,
+               title: conversationData.title || 'Page Extracted Conversation'
+             }
+           };
+           
+           if (previousConversationId && previousConversationId !== newConversationId) {
+             console.log('🧹 New conversation detected via page extraction, clearing old analysis');
+             console.log(`Previous: ${previousConversationId} → Current: ${newConversationId}`);
+             
+             // Also clear analysis data
+             chrome.storage.local.remove(['analysisData'], () => {
+               // Save new data after clearing old analysis
+               chrome.storage.local.set(dataToSet);
+               console.log('✅ Old analysis cleared, new data saved');
+             });
+           } else {
+             // Just save new data
+             chrome.storage.local.set(dataToSet);
+           }
+         });
         
         sendResponse({ 
           success: true, 

@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOM elements
   const analyzeBtn = document.getElementById('analyze-btn');
   const extractBtn = document.getElementById('extract-btn');
+  const clearDataBtn = document.getElementById('clear-data-btn');
   const newConversationBtn = document.getElementById('new-conversation-btn');
   const tipsHeader = document.getElementById('tips-header');
   const tipsContent = document.getElementById('tips-content');
@@ -102,6 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Action buttons
     analyzeBtn.addEventListener('click', handleAnalyzeClick);
     extractBtn.addEventListener('click', handleExtractClick);
+    clearDataBtn.addEventListener('click', handleClearDataClick);
     newConversationBtn.addEventListener('click', handleNewConversationClick);
   }
   
@@ -263,6 +265,58 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       extractBtn.disabled = false;
       extractBtn.innerHTML = '<span class="section-icon">📄</span>Try Page Extraction';
+    }
+  }
+  
+  async function handleClearDataClick() {
+    try {
+      updateStatus('analyzing', 'Clearing old data...');
+      clearDataBtn.disabled = true;
+      clearDataBtn.innerHTML = '<span class="section-icon">⏳</span>Clearing...';
+      
+      // Get all storage data to see what we're clearing
+      const allData = await chrome.storage.local.get(null);
+      const keysToRemove = [];
+      
+      // Identify all ChatGPT Analyst related keys
+      Object.keys(allData).forEach(key => {
+        if (key.includes('chatgpt') || 
+            key.includes('conversation') || 
+            key.includes('analysis') ||
+            key === 'conversationData' ||
+            key === 'conversationMetadata' ||
+            key === 'analysisData') {
+          keysToRemove.push(key);
+        }
+      });
+      
+      if (keysToRemove.length > 0) {
+        console.log('🧹 Clearing storage keys:', keysToRemove);
+        
+        // Remove all identified keys
+        await chrome.storage.local.remove(keysToRemove);
+        
+        // Clear UI
+        currentAnalysis = null;
+        updateStats(null);
+        resultsSection.style.display = 'none';
+        
+        showNotification(`Cleared ${keysToRemove.length} data items successfully!`);
+        updateStatus('ready', 'All old data cleared - ready for new analysis');
+        
+        console.log('✅ Successfully cleared all old data');
+      } else {
+        showNotification('No old data found to clear');
+        updateStatus('ready', 'No old data found');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error clearing data:', error);
+      showNotification('Failed to clear data: ' + error.message, 'error');
+      updateStatus('error', 'Failed to clear data');
+    } finally {
+      clearDataBtn.disabled = false;
+      clearDataBtn.innerHTML = '<span class="section-icon">🧹</span>Clear Old Data';
     }
   }
   

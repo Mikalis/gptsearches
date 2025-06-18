@@ -180,29 +180,44 @@ function setupNetworkInterception(tabId, conversationId) {
                    
                    // Only process if this looks like a real conversation (has mapping)
                    if (jsonData.mapping && Object.keys(jsonData.mapping).length > 0) {
-                     // Save the conversation data with the key the content script expects
-                     const storageData = {
-                       timestamp: new Date().toISOString(),
-                       conversationId: conversationId,
-                       source: 'network_interception',
-                       url: url,
-                       title: jsonData.title || 'Untitled Conversation',
-                       dataSize: body.length
-                     };
-                     
-                     try {
-                       // Save both the raw conversation data and metadata
-                       chrome.storage.local.set({
-                         'conversationData': jsonData,  // The key content script looks for
-                         'conversationMetadata': storageData,
-                         [`chatgpt_analyst_data_${conversationId}`]: storageData  // Keep backup
-                       }, () => {
-                         console.log('[ChatGPT Analyst] 💾 Saved intercepted data to storage for:', conversationId);
-                         console.log('[ChatGPT Analyst] 📊 Data keys saved: conversationData, conversationMetadata');
-                       });
-                     } catch (storageError) {
-                       console.error('[ChatGPT Analyst] Error saving to storage:', storageError);
-                     }
+                     // Clear old analysis data when we detect a new conversation
+                     chrome.storage.local.get(['conversationMetadata'], (existingData) => {
+                       const previousConversationId = existingData.conversationMetadata?.conversationId;
+                       
+                       if (previousConversationId && previousConversationId !== conversationId) {
+                         console.log('[ChatGPT Analyst] 🧹 New conversation detected, clearing old analysis data');
+                         console.log(`[ChatGPT Analyst] Previous: ${previousConversationId} → Current: ${conversationId}`);
+                         
+                         // Clear analysis data from previous conversation
+                         chrome.storage.local.remove(['analysisData'], () => {
+                           console.log('[ChatGPT Analyst] ✅ Old analysis data cleared');
+                         });
+                       }
+                       
+                       // Save the conversation data with the key the content script expects
+                       const storageData = {
+                         timestamp: new Date().toISOString(),
+                         conversationId: conversationId,
+                         source: 'network_interception',
+                         url: url,
+                         title: jsonData.title || 'Untitled Conversation',
+                         dataSize: body.length
+                       };
+                       
+                       try {
+                         // Save both the raw conversation data and metadata
+                         chrome.storage.local.set({
+                           'conversationData': jsonData,  // The key content script looks for
+                           'conversationMetadata': storageData,
+                           [`chatgpt_analyst_data_${conversationId}`]: storageData  // Keep backup
+                         }, () => {
+                           console.log('[ChatGPT Analyst] 💾 Saved intercepted data to storage for:', conversationId);
+                           console.log('[ChatGPT Analyst] 📊 Data keys saved: conversationData, conversationMetadata');
+                         });
+                       } catch (storageError) {
+                         console.error('[ChatGPT Analyst] Error saving to storage:', storageError);
+                       }
+                     });
                      
                      // Try to send to content script (might fail if page reloaded)
                      chrome.tabs.sendMessage(tabId, {
