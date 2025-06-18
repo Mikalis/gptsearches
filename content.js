@@ -16,20 +16,29 @@ function initializeOverlay() {
   createOverlay();
   displayAnalysisData();
   
-  // Check for existing data every 3 seconds (in case we missed the storage event)
+  // Check for existing data every 2 seconds (in case we missed the storage event)
   setInterval(() => {
     checkForNewData();
-  }, 3000);
+  }, 2000);
+  
+  // Also check immediately
+  setTimeout(() => {
+    checkForNewData();
+  }, 1000);
   
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
-      if (changes.conversationData) {
-        console.log('📊 Conversation data updated, refreshing display');
+      console.log('🔄 Storage change detected:', Object.keys(changes));
+      
+      if (changes.conversationData || changes.conversationMetadata) {
+        console.log('📊 Conversation data/metadata updated, processing...');
         showNotification('📊 New conversation data detected!');
+        
+        // Force immediate check for new data
         setTimeout(() => {
-          displayAnalysisData();
-        }, 500);
+          checkForNewData();
+        }, 100);
       }
       
       if (changes.analysisData) {
@@ -40,19 +49,79 @@ function initializeOverlay() {
   });
 }
 
+// Track last processed data to avoid reprocessing
+let lastProcessedTimestamp = null;
+let lastConversationId = null;
+
 async function checkForNewData() {
   try {
     const result = await chrome.storage.local.get(['conversationData', 'analysisData', 'conversationMetadata']);
     
-    if (result.conversationData && !result.analysisData) {
-      console.log('🔍 Found new conversation data without analysis - processing...');
+    // Check if we have new conversation metadata
+    if (result.conversationMetadata) {
+      const currentTimestamp = result.conversationMetadata.timestamp;
+      const currentConversationId = result.conversationMetadata.conversationId;
+      
+      // Check if this is new data
+      const isNewData = (
+        currentTimestamp !== lastProcessedTimestamp || 
+        currentConversationId !== lastConversationId
+      );
+      
+              if (isNewData) {
+          console.log('🔥 NEW DATA DETECTED:', {
+            previousTimestamp: lastProcessedTimestamp,
+            currentTimestamp: currentTimestamp,
+            previousId: lastConversationId,
+            currentId: currentConversationId
+          });
+          
+          setStatusProcessing();
+          lastProcessedTimestamp = currentTimestamp;
+          lastConversationId = currentConversationId;
+        
+        if (result.conversationData) {
+          console.log('🔍 Processing new conversation data...');
+          const analysis = extractSearchAndReasoning(result.conversationData);
+          
+          if (analysis.searchQueries.length > 0 || analysis.thoughts.length > 0 || 
+              analysis.sources.length > 0 || analysis.reasoning.length > 0) {
+            
+            await chrome.storage.local.set({ analysisData: analysis });
+            console.log('✅ Auto-processed NEW conversation data:', {
+              queries: analysis.searchQueries.length,
+              thoughts: analysis.thoughts.length,
+              sources: analysis.sources.length,
+              reasoning: analysis.reasoning.length,
+              title: result.conversationMetadata.title
+            });
+            
+            showNotification(`🎉 NEW: ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts!`);
+            setStatusFound();
+            displayAnalysisData();
+            
+            // Return to monitoring after 3 seconds
+            setTimeout(() => {
+              setStatusMonitoring();
+            }, 3000);
+          } else {
+            console.log('⚠️ New data found but no extractable content');
+            showNotification('📄 New conversation detected');
+            setStatusMonitoring();
+            displayAnalysisData();
+          }
+        }
+      }
+    } else if (result.conversationData && !result.analysisData) {
+      // Fallback: process conversation data without metadata
+      console.log('🔍 Found conversation data without metadata - processing...');
       const analysis = extractSearchAndReasoning(result.conversationData);
       
       if (analysis.searchQueries.length > 0 || analysis.thoughts.length > 0 || 
           analysis.sources.length > 0 || analysis.reasoning.length > 0) {
         
         await chrome.storage.local.set({ analysisData: analysis });
-        console.log('✅ Auto-processed conversation data:', {
+        console.log('✅ Processed conversation data (fallback):', {
           queries: analysis.searchQueries.length,
           thoughts: analysis.thoughts.length,
           sources: analysis.sources.length,
@@ -63,16 +132,9 @@ async function checkForNewData() {
         displayAnalysisData();
       }
     }
-    
-    if (result.conversationMetadata) {
-      console.log('📋 Conversation metadata:', {
-        title: result.conversationMetadata.title,
-        timestamp: result.conversationMetadata.timestamp,
-        source: result.conversationMetadata.source
-      });
-    }
   } catch (error) {
     // Silent fail for background check
+    console.debug('checkForNewData error:', error);
   }
 }
 
@@ -92,6 +154,21 @@ function createOverlay() {
   
   const title = document.createElement('h3');
   title.textContent = 'ChatGPT Analyst';
+  
+  // Status indicator
+  const statusIndicator = document.createElement('div');
+  statusIndicator.className = 'status-indicator';
+  statusIndicator.id = 'statusIndicator';
+  
+  const statusDot = document.createElement('span');
+  statusDot.className = 'status-dot';
+  
+  const statusText = document.createElement('span');
+  statusText.className = 'status-text';
+  statusText.textContent = 'Monitoring';
+  
+  statusIndicator.appendChild(statusDot);
+  statusIndicator.appendChild(statusText);
   
   const controls = document.createElement('div');
   controls.className = 'overlay-controls';
@@ -122,6 +199,7 @@ function createOverlay() {
   controls.appendChild(closeBtn);
   
   header.appendChild(title);
+  header.appendChild(statusIndicator);
   header.appendChild(controls);
   
   // Content area
@@ -140,6 +218,9 @@ function createOverlay() {
   
   document.body.appendChild(overlay);
   overlayVisible = true;
+  
+  // Initialize status
+  setStatusMonitoring();
   
   console.log('✅ Enhanced overlay created successfully');
 }
@@ -772,6 +853,7 @@ function handleRefreshClick() {
 async function forceAnalyzeData() {
   try {
     showNotification('🔍 Force analyzing all available data...');
+    setStatusProcessing();
     console.log('🔍 Force analyze triggered');
     
     // Get all storage data
@@ -826,22 +908,41 @@ async function forceAnalyzeData() {
       if (analysis.searchQueries.length > 0 || analysis.thoughts.length > 0 || 
           analysis.sources.length > 0 || analysis.reasoning.length > 0) {
         showNotification(`🎉 Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
+        setStatusFound();
         displayAnalysisData();
+        
+        // Return to monitoring after 3 seconds
+        setTimeout(() => {
+          setStatusMonitoring();
+        }, 3000);
       } else {
         showNotification('⚠️ No analysis data found in conversation');
+        setStatusMonitoring();
         displayAnalysisData();
       }
     } else {
       console.log('❌ No conversation data found in storage');
       showNotification('❌ No conversation data found - try refreshing the page');
+      setStatusError();
       
       // Show debug information
       console.log('🔧 Available storage keys:', Object.keys(allData));
       displayAnalysisData();
+      
+      // Return to monitoring after 3 seconds
+      setTimeout(() => {
+        setStatusMonitoring();
+      }, 3000);
     }
   } catch (error) {
     console.error('❌ Error in force analyze:', error);
     showNotification('❌ Force analyze failed: ' + error.message);
+    setStatusError();
+    
+    // Return to monitoring after 5 seconds
+    setTimeout(() => {
+      setStatusMonitoring();
+    }, 5000);
   }
 }
 
@@ -869,6 +970,31 @@ function hideOverlay() {
       overlayVisible = false;
     }, 300);
   }
+}
+
+// Status update functions
+function updateStatus(text, color = '#4caf50') {
+  const statusText = document.querySelector('.status-text');
+  const statusDot = document.querySelector('.status-dot');
+  
+  if (statusText) statusText.textContent = text;
+  if (statusDot) statusDot.style.background = color;
+}
+
+function setStatusMonitoring() {
+  updateStatus('Monitoring', '#4caf50');
+}
+
+function setStatusProcessing() {
+  updateStatus('Processing...', '#ffb74d');
+}
+
+function setStatusFound() {
+  updateStatus('Data Found!', '#81c784');
+}
+
+function setStatusError() {
+  updateStatus('Error', '#ff6b6b');
 }
 
 // Debug function for troubleshooting

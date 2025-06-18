@@ -60,6 +60,43 @@
   font-size: 18px;
 }
 
+/* Status Indicator */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(26, 26, 46, 0.6);
+  border-radius: 20px;
+  border: 1px solid rgba(79, 195, 247, 0.3);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  background: #4caf50;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-text {
+  font-size: 12px;
+  color: #e8eaed;
+  font-weight: 500;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(76, 175, 80, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+  }
+}
+
 /* Control buttons */
 .overlay-controls {
   display: flex;
