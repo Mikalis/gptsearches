@@ -41,16 +41,17 @@ chrome.webRequest.onCompleted.addListener(
     // Log all completed requests for debugging
     console.log(`[ChatGPT Analyst] Response: ${details.method} ${details.url} -> ${details.statusCode}`);
     
-    // Look for any request that might contain conversation data
-    const isConversationRelated = 
-      details.url.includes('/backend-api/') && 
+    // Only target the specific conversation endpoint we need
+    const isTargetConversationRequest = 
+      details.url.includes('/backend-api/conversation/') && 
       details.statusCode === 200 &&
-      (details.method === 'GET' || details.method === 'POST');
+      details.method === 'GET' &&
+      !details.url.includes('/textdocs'); // Skip textdocs endpoint
     
-    if (isConversationRelated) {
-      console.log(`[ChatGPT Analyst] Found potential conversation data: ${details.url}`);
+    if (isTargetConversationRequest) {
+      console.log(`[ChatGPT Analyst] Found target conversation request: ${details.url}`);
       
-      // Try to intercept this response
+      // Inject the response interceptor for this specific request
       chrome.scripting.executeScript({
         target: { tabId: tabId },
         world: 'MAIN',
@@ -73,9 +74,9 @@ chrome.webRequest.onCompleted.addListener(
   ["responseHeaders"]
 );
 
-// Simplified function to intercept any response that might contain conversation data
+// Focused function to intercept conversation response data
 function interceptAnyConversationResponse(responseUrl, method) {
-  console.log(`[ChatGPT Analyst] Intercepting: ${method} ${responseUrl}`);
+  console.log(`[ChatGPT Analyst] 🎯 Setting up interception for: ${method} ${responseUrl}`);
   
   // Get conversation ID from current page
   const conversationId = getCurrentConversationId();
@@ -84,60 +85,72 @@ function interceptAnyConversationResponse(responseUrl, method) {
     return;
   }
   
-  console.log(`[ChatGPT Analyst] Looking for conversation ID: ${conversationId}`);
+  console.log(`[ChatGPT Analyst] Target conversation ID: ${conversationId}`);
   
-  // Instead of overriding fetch, use a response listener approach
-  const originalXHROpen = XMLHttpRequest.prototype.open;
-  const originalXHRSend = XMLHttpRequest.prototype.send;
-  
-  // Store original fetch for monitoring without breaking auth
-  const originalFetch = window.fetch;
   let foundData = false;
+  let originalMethods = {};
   
-  // Monitor responses without interfering with requests
-  const responseObserver = new PerformanceObserver((list) => {
-    for (const entry of list.getEntries()) {
-      if (entry.name.includes('/backend-api/conversation/') && 
-          entry.name.includes(conversationId) &&
-          !foundData) {
-        
-        console.log('[ChatGPT Analyst] Found conversation API call:', entry.name);
-        
-        // Try to get the response data using a different approach
-        setTimeout(() => {
-          tryExtractConversationFromDOM(conversationId);
-        }, 1000);
-      }
-    }
-  });
-  
-  responseObserver.observe({ entryTypes: ['resource'] });
-  
-  // Also try to monitor successful fetch responses more carefully
-  window.fetch = function(...args) {
-    const result = originalFetch.apply(this, args);
-    const url = args[0];
+  // Method 1: Intercept Response.prototype.json() for fetch responses
+  originalMethods.responseJson = Response.prototype.json;
+  Response.prototype.json = function() {
+    const result = originalMethods.responseJson.call(this);
+    const url = this.url;
     
-    if (typeof url === 'string' && 
-        url.includes('/backend-api/conversation/') && 
-        url.includes(conversationId)) {
+    if (url && url.includes('/backend-api/conversation/') && 
+        url.includes(conversationId) && !foundData) {
       
-      console.log('[ChatGPT Analyst] Monitoring conversation fetch:', url);
+      console.log('[ChatGPT Analyst] 🎉 Intercepted Response.json() for:', url);
       
-      result.then(response => {
-        if (response.ok && !foundData) {
-          // Clone response and try to read it
-          response.clone().json().then(data => {
+      result.then(data => {
+        if (isConversationData(data, conversationId)) {
+          foundData = true;
+          console.log('[ChatGPT Analyst] ✅ Successfully captured conversation data via Response.json!', {
+            url: url,
+            dataSize: JSON.stringify(data).length,
+            hasMapping: !!data.mapping,
+            mappingKeys: data.mapping ? Object.keys(data.mapping).length : 0,
+            title: data.title
+          });
+          
+          // Send success data
+          window.postMessage({
+            type: 'CHATGPT_CONVERSATION_DATA',
+            data: data,
+            conversationId: conversationId,
+            url: url,
+            timestamp: Date.now(),
+            success: true
+          }, '*');
+          
+          // Restore original methods
+          restoreOriginalMethods();
+        } else {
+          console.log('[ChatGPT Analyst] Response data does not match conversation criteria');
+        }
+      }).catch(e => {
+        console.log('[ChatGPT Analyst] JSON parsing failed:', e);
+      });
+    }
+    
+    return result;
+  };
+  
+  // Method 2: Intercept XMLHttpRequest for legacy API calls
+  originalMethods.xhrOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url, ...args) {
+    if (url && url.includes('/backend-api/conversation/') && 
+        url.includes(conversationId) && !foundData) {
+      
+      console.log('[ChatGPT Analyst] 🎯 Monitoring XMLHttpRequest to:', url);
+      
+      this.addEventListener('load', function() {
+        if (this.status === 200 && !foundData) {
+          try {
+            const data = JSON.parse(this.responseText);
             if (isConversationData(data, conversationId)) {
               foundData = true;
-              console.log('[ChatGPT Analyst] Successfully captured conversation data!', {
-                url: url,
-                dataSize: JSON.stringify(data).length,
-                hasMapping: !!data.mapping,
-                title: data.title
-              });
+              console.log('[ChatGPT Analyst] ✅ Successfully captured conversation data via XMLHttpRequest!');
               
-              // Send to content script
               window.postMessage({
                 type: 'CHATGPT_CONVERSATION_DATA',
                 data: data,
@@ -147,89 +160,42 @@ function interceptAnyConversationResponse(responseUrl, method) {
                 success: true
               }, '*');
               
-              // Cleanup
-              responseObserver.disconnect();
-              window.fetch = originalFetch;
+              restoreOriginalMethods();
             }
-          }).catch(e => {
-            console.log('[ChatGPT Analyst] Could not parse JSON from response');
-          });
+          } catch (e) {
+            console.log('[ChatGPT Analyst] XHR response was not JSON');
+          }
         }
-      }).catch(e => {
-        console.log('[ChatGPT Analyst] Request failed:', e.message);
       });
     }
     
-    return result;
+    return originalMethods.xhrOpen.call(this, method, url, ...args);
   };
   
-  // Restore after timeout
+  // Auto-restore after 10 seconds
   setTimeout(() => {
     if (!foundData) {
-      console.log('[ChatGPT Analyst] Timeout - restoring original fetch');
-      window.fetch = originalFetch;
-      responseObserver.disconnect();
-    }
-  }, 15000);
-  
-  // Helper function to extract conversation data from DOM or other sources
-  function tryExtractConversationFromDOM(conversationId) {
-    // Try to find conversation data in the page's javascript context
-    if (window.__NEXT_DATA__ && window.__NEXT_DATA__.props) {
-      console.log('[ChatGPT Analyst] Found Next.js data, searching for conversation...');
+      console.log('[ChatGPT Analyst] ⏰ Timeout - restoring original methods without finding data');
+      restoreOriginalMethods();
       
-      const props = window.__NEXT_DATA__.props;
-      if (props.pageProps && props.pageProps.serverResponse) {
-        const serverData = props.pageProps.serverResponse.data;
-        if (isConversationData(serverData, conversationId)) {
-          foundData = true;
-          console.log('[ChatGPT Analyst] Found conversation data in Next.js context!');
-          
-          window.postMessage({
-            type: 'CHATGPT_CONVERSATION_DATA',
-            data: serverData,
-            conversationId: conversationId,
-            url: 'DOM_EXTRACTION',
-            timestamp: Date.now(),
-            success: true
-          }, '*');
-          
-          return;
-        }
-      }
+      // Send error if no data found
+      window.postMessage({
+        type: 'CHATGPT_CONVERSATION_ERROR',
+        error: 'Could not capture conversation data from the API response. The conversation might be loading or the response structure has changed.',
+        conversationId: conversationId,
+        timestamp: Date.now()
+      }, '*');
     }
-    
-    // Try to look for conversation data in window globals
-    const possibleDataSources = [
-      'window.__INITIAL_STATE__',
-      'window.__PRELOADED_STATE__',
-      'window.__CONVERSATION_DATA__'
-    ];
-    
-    for (const source of possibleDataSources) {
-      try {
-        const data = eval(source);
-        if (data && isConversationData(data, conversationId)) {
-          foundData = true;
-          console.log(`[ChatGPT Analyst] Found conversation data in ${source}!`);
-          
-          window.postMessage({
-            type: 'CHATGPT_CONVERSATION_DATA',
-            data: data,
-            conversationId: conversationId,
-            url: source,
-            timestamp: Date.now(),
-            success: true
-          }, '*');
-          
-          return;
-        }
-      } catch (e) {
-        // Source doesn't exist or not accessible
-      }
+  }, 10000);
+  
+  function restoreOriginalMethods() {
+    if (originalMethods.responseJson) {
+      Response.prototype.json = originalMethods.responseJson;
     }
-    
-    console.log('[ChatGPT Analyst] Could not find conversation data in DOM context');
+    if (originalMethods.xhrOpen) {
+      XMLHttpRequest.prototype.open = originalMethods.xhrOpen;
+    }
+    console.log('[ChatGPT Analyst] 🔄 Original methods restored');
   }
   
   // Helper function to check if data contains conversation
