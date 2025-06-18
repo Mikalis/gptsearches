@@ -1029,17 +1029,23 @@ function extractSearchAndReasoning(data) {
 async function initializeChatGPTAnalyst() {
   console.log('[ChatGPT Analyst] Initializing extension...');
   
-  // Wait for page to be ready
-  await waitForPageReady();
+  try {
+    // Wait for page to be ready
+    await waitForPageReady();
+    
+    // Start observing for new messages
+    observeForNewMessages();
+    
+    // Create overlay initially hidden
+    createOverlay();
+    hideOverlay();
+  } catch (error) {
+    console.error('[ChatGPT Analyst] Error during initialization:', error);
+    // Try to create overlay anyway
+    createOverlay();
+  }
   
-  // Start observing for new messages
-  observeForNewMessages();
-  
-  // Create overlay initially hidden
-  createOverlay();
-  hideOverlay();
-  
-  // Show initial message
+  // Show initial message and auto-show overlay
   const contentDiv = document.getElementById(CONFIG.contentId);
   if (contentDiv) {
     contentDiv.innerHTML = `
@@ -1058,6 +1064,13 @@ async function initializeChatGPTAnalyst() {
       </div>
     `;
     addPromotionalContent(contentDiv);
+  }
+  
+  // Auto-show overlay on ChatGPT pages
+  if (window.location.hostname.includes('chatgpt.com')) {
+    setTimeout(() => {
+      showOverlay();
+    }, 1000);
   }
   
   console.log('[ChatGPT Analyst] Extension initialized successfully');
@@ -1089,6 +1102,17 @@ window.debugChatGPTAnalyst = function() {
 console.log('[ChatGPT Analyst] Debug commands available:');
 console.log('- window.testChatGPTAnalystOverlay() - Test overlay display');
 console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
+
+// Force show overlay for debugging
+window.forceShowOverlay = function() {
+  console.log('[ChatGPT Analyst] Force showing overlay...');
+  if (!overlayElement) {
+    createOverlay();
+  }
+  showOverlay();
+  console.log('Overlay element exists:', !!overlayElement);
+  console.log('Overlay visible:', overlayVisible);
+};
 
 // Legacy functions removed - no longer needed with direct API approach
 // These functions violated CSP by injecting inline scripts
