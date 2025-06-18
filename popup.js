@@ -134,104 +134,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!currentTab || analyzeBtn.disabled) return;
     
     try {
-      updateStatus('analyzing', 'Analyzing conversation...');
+      updateStatus('analyzing', 'Refreshing page to capture fresh data...');
       analyzeBtn.disabled = true;
-      analyzeBtn.innerHTML = '<span class="section-icon">⏳</span>Analyzing...';
+      analyzeBtn.innerHTML = '<span class="section-icon">⏳</span>Refreshing & Analyzing...';
       
-      // Get conversation data from storage
-      const result = await chrome.storage.local.get(['conversationData', 'conversationDetected']);
-      
-      if (!result.conversationData) {
-        // Try automatic refresh first, then analyze
-        console.log('🔄 No conversation data found, trying automatic refresh + analyze...');
-        updateStatus('analyzing', 'Refreshing page for data capture...');
-        
-        try {
-          await refreshAndAnalyze();
-          return; // Exit here, refreshAndAnalyze will handle the rest
-        } catch (refreshError) {
-          console.log('🔄 Automatic refresh failed, trying fallback methods...');
-          // Continue with existing fallback logic
-        }
-      
-        // Existing fallback logic if refresh doesn't work
-        // Check if we detected a conversation but couldn't read the data
-        if (result.conversationDetected && result.conversationDetected.needsRefresh) {
-          showNotification('Conversation detected but data not accessible. Try refreshing the ChatGPT page first.', 'error');
-          updateStatus('error', 'Refresh ChatGPT page needed');
-          
-          // Show refresh suggestion
-          document.getElementById('new-conversation-btn').innerHTML = '<span class="section-icon">🔄</span>Refresh ChatGPT Page';
-          document.getElementById('new-conversation-btn').onclick = () => {
-            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-              chrome.tabs.reload(tabs[0].id);
-              window.close();
-            });
-          };
-        } else {
-          // Try fallback: extract data directly from page
-          console.log('🔄 Trying fallback page extraction...');
-          updateStatus('analyzing', 'Trying to extract from page...');
-          
-          try {
-            const response = await chrome.tabs.sendMessage(currentTab.id, {
-              action: 'extractPageData'
-            });
-            
-            if (response && response.success && response.hasData) {
-              showNotification('Successfully extracted data from page!');
-              // Retry analysis with newly extracted data
-              setTimeout(() => {
-                handleAnalyzeClick();
-              }, 500);
-              return;
-                         } else {
-               showNotification('No conversation data found. Make sure you are on a ChatGPT conversation page and try refreshing.', 'error');
-               updateStatus('error', 'No conversation data found');
-               
-               // Show extract button as alternative
-               extractBtn.style.display = 'block';
-             }
-           } catch (extractError) {
-             console.error('❌ Page extraction failed:', extractError);
-             showNotification('Could not extract data from page. Try refreshing the ChatGPT page.', 'error');
-             updateStatus('error', 'Page extraction failed');
-             
-             // Show extract button as alternative
-             extractBtn.style.display = 'block';
-           }
-        }
-        resetAnalyzeButton();
-        return;
-      }
-      
-      // Extract and analyze data
-      const analysis = extractSearchAndReasoning(result.conversationData);
-      
-      if (!analysis || (!analysis.searchQueries.length && !analysis.thoughts.length && 
-          !analysis.sources.length && !analysis.reasoning.length)) {
-        showNotification('No analysis data found in conversation.', 'error');
-        updateStatus('ready', 'No analysis data found');
-        resetAnalyzeButton();
-        return;
-      }
-      
-      // Store analysis and display results
-      currentAnalysis = analysis;
-      await chrome.storage.local.set({ analysisData: analysis });
-      
-      displayResults(analysis);
-      updateStatus('success', `Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
-      showNotification(`Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
-      
-      // Hide extract button on successful analysis
-      extractBtn.style.display = 'none';
-      
-      resetAnalyzeButton();
+      // Always refresh to get the latest conversation data
+      console.log('🔄 Starting refresh + analyze (always refresh mode)...');
+      await refreshAndAnalyze();
       
     } catch (error) {
-      console.error('❌ Error during analysis:', error);
-      updateStatus('error', 'Analysis failed - try refreshing the page');
+      console.error('❌ Error during refresh + analysis:', error);
+      updateStatus('error', 'Analysis failed - try again');
       showNotification('Analysis failed: ' + error.message, 'error');
       resetAnalyzeButton();
     }
