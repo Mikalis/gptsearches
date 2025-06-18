@@ -142,6 +142,19 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await chrome.storage.local.get(['conversationData', 'conversationDetected']);
       
       if (!result.conversationData) {
+        // Try automatic refresh first, then analyze
+        console.log('🔄 No conversation data found, trying automatic refresh + analyze...');
+        updateStatus('analyzing', 'Refreshing page for data capture...');
+        
+        try {
+          await refreshAndAnalyze();
+          return; // Exit here, refreshAndAnalyze will handle the rest
+        } catch (refreshError) {
+          console.log('🔄 Automatic refresh failed, trying fallback methods...');
+          // Continue with existing fallback logic
+        }
+      
+        // Existing fallback logic if refresh doesn't work
         // Check if we detected a conversation but couldn't read the data
         if (result.conversationDetected && result.conversationDetected.needsRefresh) {
           showNotification('Conversation detected but data not accessible. Try refreshing the ChatGPT page first.', 'error');
@@ -227,6 +240,77 @@ document.addEventListener('DOMContentLoaded', () => {
   function resetAnalyzeButton() {
     analyzeBtn.disabled = false;
     analyzeBtn.innerHTML = '<span class="section-icon">🔍</span>Analyze Conversation';
+  }
+  
+  async function refreshAndAnalyze() {
+    return new Promise((resolve, reject) => {
+      console.log('🔄 Starting automatic refresh and analyze process...');
+      
+      // Set up tab update listener to detect when refresh is complete
+      const onTabUpdated = (tabId, changeInfo, tab) => {
+        if (tabId === currentTab.id && changeInfo.status === 'complete') {
+          console.log('✅ Page refresh completed, starting analysis in 3 seconds...');
+          
+          // Remove the listener
+          chrome.tabs.onUpdated.removeListener(onTabUpdated);
+          
+          // Wait a bit more for background script to capture data
+          setTimeout(async () => {
+            try {
+              updateStatus('analyzing', 'Page refreshed, analyzing conversation...');
+              
+              // Try to get conversation data after refresh
+              const result = await chrome.storage.local.get(['conversationData']);
+              
+              if (result.conversationData) {
+                console.log('🎉 Found conversation data after refresh!');
+                
+                // Extract and analyze data
+                const analysis = extractSearchAndReasoning(result.conversationData);
+                
+                if (analysis.searchQueries.length > 0 || analysis.thoughts.length > 0 || 
+                    analysis.sources.length > 0 || analysis.reasoning.length > 0) {
+                  
+                  // Store analysis and display results
+                  currentAnalysis = analysis;
+                  await chrome.storage.local.set({ analysisData: analysis });
+                  
+                  displayResults(analysis);
+                  updateStatus('success', `Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
+                  showNotification(`✅ Refresh + Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
+                  
+                  extractBtn.style.display = 'none';
+                  resetAnalyzeButton();
+                  resolve(true);
+                } else {
+                  throw new Error('No analysis data found after refresh');
+                }
+              } else {
+                throw new Error('No conversation data found after refresh');
+              }
+            } catch (error) {
+              console.error('❌ Analysis failed after refresh:', error);
+              updateStatus('error', 'Analysis failed after refresh');
+              resetAnalyzeButton();
+              reject(error);
+            }
+          }, 3000); // Wait 3 seconds for background script
+        }
+      };
+      
+      // Add the listener
+      chrome.tabs.onUpdated.addListener(onTabUpdated);
+      
+      // Set timeout to prevent infinite waiting
+      setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(onTabUpdated);
+        reject(new Error('Refresh timeout'));
+      }, 15000); // 15 second timeout
+      
+      // Trigger the refresh
+      console.log('🔄 Triggering page refresh...');
+      chrome.tabs.reload(currentTab.id);
+    });
   }
   
   async function handleExtractClick() {
