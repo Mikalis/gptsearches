@@ -89,6 +89,7 @@ function interceptAnyConversationResponse(responseUrl, method) {
   
   let foundData = false;
   let originalMethods = {};
+  let interceptCount = 0;
   
      // Method 1: Intercept Response.prototype.json() for fetch responses
    originalMethods.responseJson = Response.prototype.json;
@@ -96,8 +97,29 @@ function interceptAnyConversationResponse(responseUrl, method) {
      const result = originalMethods.responseJson.call(this);
      const url = this.url;
      
-     if (url && url.includes('/backend-api/conversation/') && 
-         url.includes(conversationId) && !url.includes('/textdocs') && !foundData) {
+     interceptCount++;
+     console.log(`[ChatGPT Analyst] 📡 Response.json() call #${interceptCount} for:`, url);
+     
+     // Log ALL conversation API responses for debugging
+     if (url && url.includes('/backend-api/')) {
+       console.log('[ChatGPT Analyst] 🔍 Found backend-api response:', {
+         url: url,
+         includesConversation: url.includes('/conversation/'),
+         includesId: url.includes(conversationId),
+         isTextdocs: url.includes('/textdocs'),
+         isAttachments: url.includes('/attachments'),
+         shouldIntercept: url.includes('/backend-api/conversation/') && url.includes(conversationId) && !url.includes('/textdocs') && !url.includes('/attachments') && !foundData
+       });
+     }
+     
+     // More aggressive filtering - intercept exact URL
+     if (url && (
+         url === `https://chatgpt.com/backend-api/conversation/${conversationId}` ||
+         (url.includes('/backend-api/conversation/') && 
+          url.includes(conversationId) && 
+          !url.includes('/textdocs') && 
+          !url.includes('/attachments'))
+       ) && !foundData) {
        
        console.log('[ChatGPT Analyst] 🎉 Intercepted Response.json() for:', url);
        
@@ -142,6 +164,15 @@ function interceptAnyConversationResponse(responseUrl, method) {
            if (data && data.detail && data.detail.code) {
              console.log('[ChatGPT Analyst] Found error response:', data.detail);
              foundData = true; // Prevent timeout
+             
+             // Send error message
+             window.postMessage({
+               type: 'CHATGPT_CONVERSATION_ERROR',
+               error: `API Error: ${data.detail.message || data.detail.code}`,
+               conversationId: conversationId,
+               timestamp: Date.now()
+             }, '*');
+             
              restoreOriginalMethods();
            }
          }
@@ -194,15 +225,11 @@ function interceptAnyConversationResponse(responseUrl, method) {
   setTimeout(() => {
     if (!foundData) {
       console.log('[ChatGPT Analyst] ⏰ Timeout - restoring original methods without finding data');
+      console.log(`[ChatGPT Analyst] Total Response.json() calls intercepted: ${interceptCount}`);
       restoreOriginalMethods();
       
-      // Send error if no data found
-      window.postMessage({
-        type: 'CHATGPT_CONVERSATION_ERROR',
-        error: 'Could not capture conversation data from the API response. The conversation might be loading or the response structure has changed.',
-        conversationId: conversationId,
-        timestamp: Date.now()
-      }, '*');
+      // Try to extract from existing DOM/context before giving error
+      tryExtractFromPageContext(conversationId);
     }
   }, 10000);
   
@@ -273,6 +300,119 @@ function interceptAnyConversationResponse(responseUrl, method) {
     
     console.log('[ChatGPT Analyst] ❌ Data does not match conversation criteria');
     return false;
+  }
+  
+  function tryExtractFromPageContext(conversationId) {
+    console.log('[ChatGPT Analyst] 🔍 Trying to extract conversation data from page context...');
+    
+    // Method 1: Check for Next.js SSR data
+    if (window.__NEXT_DATA__ && window.__NEXT_DATA__.props) {
+      console.log('[ChatGPT Analyst] Checking Next.js SSR data...');
+      const props = window.__NEXT_DATA__.props;
+      
+      // Check pageProps
+      if (props.pageProps) {
+        const checkNextJSData = (obj, path = '') => {
+          if (!obj || typeof obj !== 'object') return false;
+          
+          if (obj.mapping && Object.keys(obj.mapping).length > 0) {
+            console.log(`[ChatGPT Analyst] Found mapping in ${path || 'pageProps'}`);
+            if (isConversationData(obj, conversationId)) {
+              foundData = true;
+              console.log('[ChatGPT Analyst] ✅ Found conversation data in Next.js SSR!');
+              
+              window.postMessage({
+                type: 'CHATGPT_CONVERSATION_DATA',
+                data: obj,
+                conversationId: conversationId,
+                url: 'NEXTJS_SSR_DATA',
+                timestamp: Date.now(),
+                success: true
+              }, '*');
+              return true;
+            }
+          }
+          
+          // Recursively check nested objects
+          for (const key in obj) {
+            if (obj.hasOwnProperty(key) && typeof obj[key] === 'object') {
+              if (checkNextJSData(obj[key], `${path}.${key}`)) return true;
+            }
+          }
+          return false;
+        };
+        
+        if (checkNextJSData(props.pageProps)) return;
+      }
+    }
+    
+    // Method 2: Check window globals
+    const globalSources = ['__CONVERSATION_STATE__', '__CHAT_DATA__', '__INITIAL_STATE__', '__STORE__'];
+    for (const source of globalSources) {
+      try {
+        const data = window[source];
+        if (data && isConversationData(data, conversationId)) {
+          foundData = true;
+          console.log(`[ChatGPT Analyst] ✅ Found conversation data in window.${source}!`);
+          
+          window.postMessage({
+            type: 'CHATGPT_CONVERSATION_DATA',
+            data: data,
+            conversationId: conversationId,
+            url: `WINDOW_${source}`,
+            timestamp: Date.now(),
+            success: true
+          }, '*');
+          return;
+        }
+      } catch (e) {
+        // Source doesn't exist or is not accessible
+      }
+    }
+    
+    // Method 3: Try to make a direct fetch to the API
+    console.log('[ChatGPT Analyst] Attempting direct API fetch...');
+    fetch(`https://chatgpt.com/backend-api/conversation/${conversationId}`, {
+      credentials: 'include',
+      headers: {
+        'Accept': 'application/json',
+      }
+    })
+    .then(response => {
+      if (response.ok) {
+        return response.json();
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    })
+    .then(data => {
+      if (isConversationData(data, conversationId)) {
+        foundData = true;
+        console.log('[ChatGPT Analyst] ✅ Successfully fetched conversation data via direct API call!');
+        
+        window.postMessage({
+          type: 'CHATGPT_CONVERSATION_DATA',
+          data: data,
+          conversationId: conversationId,
+          url: 'DIRECT_API_FETCH',
+          timestamp: Date.now(),
+          success: true
+        }, '*');
+      } else {
+        throw new Error('Data does not match conversation criteria');
+      }
+    })
+    .catch(error => {
+      console.log('[ChatGPT Analyst] Direct API fetch failed:', error.message);
+      
+      // Send final error if all methods failed
+      window.postMessage({
+        type: 'CHATGPT_CONVERSATION_ERROR',
+        error: `Could not capture conversation data. Tried response interception, page context extraction, and direct API fetch. Error: ${error.message}`,
+        conversationId: conversationId,
+        timestamp: Date.now()
+      }, '*');
+    });
   }
   
   function getCurrentConversationId() {

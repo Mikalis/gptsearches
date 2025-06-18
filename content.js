@@ -93,6 +93,9 @@ function createOverlay() {
       if (text) {
         copyToClipboard(text);
       }
+    } else if (action === 'new-conversation') {
+      event.preventDefault();
+      window.open('https://chatgpt.com/', '_blank');
     }
   });
   
@@ -879,7 +882,7 @@ function extractSearchAndReasoning(data) {
             </ol>
           </div>
           <div class="action-buttons">
-            <button onclick="window.open('https://chatgpt.com/', '_blank')" class="primary-btn">🚀 Start New Conversation</button>
+            <button data-action="new-conversation" class="primary-btn">🚀 Start New Conversation</button>
           </div>
         </div>
       `;
@@ -928,7 +931,7 @@ function extractSearchAndReasoning(data) {
         ${troubleshootingTips}
         <div class="error-actions">
           <button class="retry-btn" data-action="analyze">🔄 Retry Analysis</button>
-          <button class="new-conversation-btn" onclick="window.open('https://chatgpt.com/', '_blank')">💬 New Conversation</button>
+          <button class="new-conversation-btn" data-action="new-conversation">💬 New Conversation</button>
         </div>
         <details class="debug-info">
           <summary>🔍 Debug Information</summary>
