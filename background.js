@@ -465,14 +465,19 @@ function attachDebuggerAndStart(tabId, conversationId) {
           chrome.debugger.onEvent.removeListener(onDebuggerEvent);
           chrome.debugger.detach({tabId});
           
-          // Notify content script
-          chrome.tabs.sendMessage(tabId, {
-            action: 'debuggerError',
-            error: 'Timeout waiting for conversation data. Try refreshing the page manually.'
+          // Check if we've already sent data before showing error
+          chrome.tabs.sendMessage(tabId, {action: 'checkDataReceived'}, (response) => {
+            // Only show error if we haven't received data yet
+            if (!response || !response.dataReceived) {
+              chrome.tabs.sendMessage(tabId, {
+                action: 'debuggerError',
+                error: 'Timeout waiting for conversation data. Try refreshing the page manually.'
+              });
+            }
           });
         }
       });
-    }, 15000);
+    }, 30000);
   });
 }
 

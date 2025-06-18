@@ -4,13 +4,15 @@
 let overlayVisible = false;
 let currentData = null;
 let overlayElement = null;
+let dataReceived = false; // Track if we've received data successfully
 
 // Configuration
 const CONFIG = {
-  overlayId: 'chatgpt-seo-overlay',
-  contentId: 'chatgpt-seo-content',
+  overlayId: 'chatgpt-analyst-overlay',
+  contentId: 'chatgpt-analyst-content',
   autoShow: true,
-  position: 'top-right'
+  position: 'top-right',
+  version: '1.0.0'
 };
 
 // Wait for page to be ready
@@ -26,11 +28,24 @@ function waitForPageReady() {
 
 // Create overlay structure
 function createOverlay() {
-  if (overlayElement) return overlayElement;
+  if (document.getElementById(CONFIG.overlayId)) {
+    console.log('[ChatGPT Analyst] Overlay already exists');
+    return;
+  }
 
-  const overlay = document.createElement('div');
-  overlay.id = CONFIG.overlayId;
-  overlay.className = 'chatgpt-seo-overlay';
+  // Create overlay element
+  overlayElement = document.createElement('div');
+  overlayElement.id = CONFIG.overlayId;
+  overlayElement.className = 'chatgpt-analyst-overlay';
+  
+  // Add persistent attribute to prevent removal during navigation
+  overlayElement.setAttribute('data-persistent', 'true');
+  
+  // Create content container
+  const contentElement = document.createElement('div');
+  contentElement.id = CONFIG.contentId;
+  contentElement.className = 'chatgpt-analyst-content';
+  overlayElement.appendChild(contentElement);
   
   // Header with title and controls
   const header = document.createElement('div');
@@ -72,15 +87,14 @@ function createOverlay() {
   statusDiv.className = 'overlay-status';
   statusDiv.textContent = 'Waiting for ChatGPT responses...';
   
-  overlay.appendChild(header);
-  overlay.appendChild(contentDiv);
-  overlay.appendChild(statusDiv);
+  overlayElement.appendChild(header);
+  overlayElement.appendChild(contentDiv);
+  overlayElement.appendChild(statusDiv);
   
-  document.body.appendChild(overlay);
-  overlayElement = overlay;
+  document.body.appendChild(overlayElement);
   
   // Add event delegation for button clicks to avoid CSP violations
-  overlay.addEventListener('click', (event) => {
+  overlayElement.addEventListener('click', (event) => {
     const target = event.target;
     const action = target.getAttribute('data-action');
     
@@ -100,7 +114,6 @@ function createOverlay() {
   });
   
   console.log('[ChatGPT Analyst] Overlay created');
-  return overlay;
 }
 
 // Update overlay content with extracted data
@@ -529,14 +542,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
     case 'debuggerError':
       console.error('[ChatGPT Analyst] Debugger error:', request.error);
-      showAnalysisResult({
-        hasData: false,
-        searchQueries: [],
-        thoughts: [],
-        reasoning: [],
-        error: request.error
-      });
+      // Only show error if we haven't received data yet
+      if (!dataReceived) {
+        showAnalysisResult({
+          hasData: false,
+          searchQueries: [],
+          thoughts: [],
+          reasoning: [],
+          error: request.error
+        });
+      }
       sendResponse({ status: 'success' });
+      break;
+      
+    case 'checkDataReceived':
+      console.log('[ChatGPT Analyst] Checking if data was received:', dataReceived);
+      sendResponse({ dataReceived: dataReceived });
       break;
       
     default:
@@ -693,6 +714,9 @@ function processNetworkData(networkData) {
   try {
     const data = networkData.data;
     
+    // Mark that we've received data
+    dataReceived = true;
+    
     // Use existing analysis function to process the conversation data
     const analysisData = extractSearchAndReasoning(data);
     
@@ -709,13 +733,10 @@ function processNetworkData(networkData) {
       analysisData.metadata.captureUrl = networkData.url;
       analysisData.metadata.captureTimestamp = new Date(networkData.timestamp).toISOString();
       
-      showAnalysisResult(analysisData);
+      // Store current data
+      currentData = analysisData;
       
-      // Clear refresh flag on success
-      chrome.runtime.sendMessage({
-        action: "clearRefreshFlag",
-        conversationId: networkData.conversationId
-      });
+      showAnalysisResult(analysisData);
       
     } else {
       console.log('[ChatGPT Analyst] No analysis data found in network response');
@@ -1069,6 +1090,9 @@ function extractSearchAndReasoning(data) {
 async function initializeChatGPTAnalyst() {
   console.log('[ChatGPT Analyst] Initializing extension...');
   
+  // Reset data received flag on new page
+  dataReceived = false;
+  
   try {
     // Wait for page to be ready
     await waitForPageReady();
@@ -1112,6 +1136,25 @@ async function initializeChatGPTAnalyst() {
       showOverlay();
     }, 1000);
   }
+  
+  // Create debug commands
+  window.testChatGPTAnalystOverlay = () => {
+    testOverlay();
+  };
+  
+  window.debugChatGPTAnalyst = () => {
+    debugAnalysis();
+  };
+  
+  // Set up mutation observer to ensure overlay persists
+  setupOverlayPersistence();
+  
+  console.log('[ChatGPT Analyst] Debug commands available:');
+  console.log('- window.testChatGPTAnalystOverlay() - Test overlay display');
+  console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
+  
+  // Disable auto-analysis to prevent reload loops
+  console.log('[ChatGPT Analyst] Auto-analysis disabled to prevent reload loops - use manual analysis instead');
   
   console.log('[ChatGPT Analyst] Extension initialized successfully');
 }
@@ -1157,3 +1200,54 @@ window.forceShowOverlay = function() {
 // Legacy functions removed - no longer needed with direct API approach
 // These functions violated CSP by injecting inline scripts
 // Global functions removed - using event delegation to avoid CSP violations 
+
+// Setup mutation observer to ensure overlay persists
+function setupOverlayPersistence() {
+  // Create a mutation observer to watch for DOM changes
+  const observer = new MutationObserver((mutations) => {
+    // Check if our overlay was removed
+    if (!document.getElementById(CONFIG.overlayId) && overlayElement && dataReceived) {
+      console.log('[ChatGPT Analyst] Overlay was removed - restoring');
+      document.body.appendChild(overlayElement);
+      
+      // If we have data, redisplay it
+      if (currentData) {
+        showAnalysisResult(currentData);
+      }
+    }
+  });
+  
+  // Start observing the document with the configured parameters
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+// Debug functions
+function testOverlay() {
+  const testData = {
+    hasData: true,
+    searchQueries: [
+      { query: "Test search query 1", timestamp: new Date().toISOString() },
+      { query: "Test search query 2", timestamp: new Date().toISOString() }
+    ],
+    thoughts: [
+      { thought: "Test internal thought process", timestamp: new Date().toISOString() }
+    ],
+    reasoning: [],
+    metadata: {
+      captureMethod: "test",
+      captureTimestamp: new Date().toISOString()
+    }
+  };
+  
+  showAnalysisResult(testData);
+}
+
+function debugAnalysis() {
+  console.log('[ChatGPT Analyst] Running debug analysis...');
+  
+  // Trigger manual analysis
+  chrome.runtime.sendMessage({
+    action: "analyzeConversation",
+    manual: true
+  });
+} 
