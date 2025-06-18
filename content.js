@@ -436,79 +436,40 @@ function showNotification(message, type = 'success') {
   }, 2000);
 }
 
-// Listen for intercepted conversation data from main world
+// Listen for network data and test overlay messages
 window.addEventListener('message', (event) => {
   if (event.source === window) {
-    if (event.data.type === 'CHATGPT_CONVERSATION_DATA') {
-      console.log('[ChatGPT Analyst] Received intercepted conversation data:', event.data.url);
-      
-      // Clear reload flag if successful
-      if (event.data.success) {
-        chrome.runtime.sendMessage({
-          action: "clearReloadFlag",
-          conversationId: event.data.conversationId
-        });
-      }
-      
-      try {
-        const conversationData = event.data.data;
-        console.log('[ChatGPT Analyst] Processing intercepted conversation data...');
-        
-        // Use existing analysis function to process the data
-        const analysisData = extractSearchAndReasoning(conversationData);
-        
-        if (analysisData.hasData) {
-          console.log('[ChatGPT Analyst] Found analysis data in intercepted response:', {
-            searchQueries: analysisData.searchQueries.length,
-            thoughts: analysisData.thoughts.length,
-            reasoning: analysisData.reasoning.length
-          });
-          showAnalysisResult(analysisData);
-        } else {
-          console.log('[ChatGPT Analyst] No analysis data found in intercepted response');
-          showAnalysisResult({
-            hasData: false,
-            searchQueries: [],
-            thoughts: [],
-            reasoning: [],
-            error: 'No search queries or internal reasoning found in this conversation'
-          });
-        }
-        
-      } catch (error) {
-        console.error('[ChatGPT Analyst] Error processing intercepted data:', error);
-        showAnalysisResult({
-          hasData: false,
-          searchQueries: [],
-          thoughts: [],
-          reasoning: [],
-          error: `Error processing conversation data: ${error.message}`
-        });
-      }
-    } else if (event.data.type === 'CHATGPT_CONVERSATION_ERROR') {
-      console.error('[ChatGPT Analyst] Received conversation error:', event.data.error);
-      
-      let errorMessage = `Failed to fetch conversation data: ${event.data.error}`;
-      let isConversationNotFound = event.data.error.includes('Conversation not found') || 
-                                  event.data.error.includes('conversation_not_found');
-      
-      console.log('[ChatGPT Analyst] Showing error result in overlay...');
-      showAnalysisResult({
-        hasData: false,
-        searchQueries: [],
-        thoughts: [],
-        reasoning: [],
-        error: errorMessage,
-        isConversationNotFound: isConversationNotFound
+    if (event.data.type === 'CHATGPT_NETWORK_DATA') {
+      console.log('[ChatGPT Analyst] 🎉 Received network data:', {
+        url: event.data.url,
+        source: event.data.source,
+        conversationId: event.data.conversationId
       });
+      
+      // Process the captured network data
+      processNetworkData(event.data);
+      
     } else if (event.data.type === 'TEST_OVERLAY') {
       // Test the overlay system
       console.log('[ChatGPT Analyst] Testing overlay display...');
       showAnalysisResult({
         hasData: true,
-        searchQueries: ['test query 1', 'test query 2'],
-        thoughts: ['test thought 1'],
-        reasoning: ['test reasoning 1'],
+        searchQueries: [
+          { query: 'latest AI developments 2024', timestamp: new Date().toISOString(), messageId: 'test1', author: 'assistant' },
+          { query: 'machine learning trends', timestamp: new Date().toISOString(), messageId: 'test2', author: 'assistant' }
+        ],
+        thoughts: [
+          { content: 'This is a test thought to verify the overlay system works correctly.', summary: 'Test thought', timestamp: new Date().toISOString(), messageId: 'test1', author: 'system' }
+        ],
+        reasoning: [
+          { text: 'Test reasoning pattern to show how search logic is displayed.', type: 'search_reasoning', timestamp: new Date().toISOString(), messageId: 'test1', author: 'assistant' }
+        ],
+        metadata: {
+          conversationTitle: 'Test Conversation',
+          lastUpdate: new Date().toISOString(),
+          totalMessages: 3,
+          captureMethod: 'test_data'
+        },
         error: null,
         isConversationNotFound: false
       });
@@ -619,9 +580,9 @@ function getCurrentConversationId() {
 
 // Network interception approach - no longer need direct API calls
 
-// Improved function to trigger analysis with fallback methods
+// NETWORK MONITORING APPROACH: Refresh page and capture JSON from network traffic
 function analyzeCurrentConversation() {
-  console.log('[ChatGPT Analyst] Manual analysis requested...');
+  console.log('[ChatGPT Analyst] 🔄 Starting network-based analysis...');
   console.log('[ChatGPT Analyst] Current URL:', window.location.href);
   
   const conversationId = getCurrentConversationId();
@@ -639,20 +600,20 @@ function analyzeCurrentConversation() {
   }
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
-  console.log('[ChatGPT Analyst] User workflow: Go to ChatGPT -> Make prompt with search -> Open network tab -> Copy ID -> Refresh page -> Search for ID in network tab');
+  console.log('[ChatGPT Analyst] Will refresh page to capture network traffic...');
   
-  // Show loading state
+  // Show refreshing state
   showAnalysisResult({
     hasData: false,
     searchQueries: [],
     thoughts: [],
     reasoning: [],
-    isLoading: true
+    isRefreshing: true
   });
   
-  // Request manual analysis from background script (this will reload the page)
+  // Request page refresh to capture network data
   chrome.runtime.sendMessage({
-    action: "manualAnalysis",
+    action: "refreshAndCapture",
     conversationId: conversationId
   }, (response) => {
     if (chrome.runtime.lastError) {
@@ -668,7 +629,7 @@ function analyzeCurrentConversation() {
     }
     
     if (response && response.error) {
-      console.error('[ChatGPT Analyst] Manual analysis error:', response.error);
+      console.error('[ChatGPT Analyst] Refresh and capture error:', response.error);
       showAnalysisResult({
         hasData: false,
         searchQueries: [],
@@ -679,17 +640,69 @@ function analyzeCurrentConversation() {
       return;
     }
     
-    if (response && response.action === 'reloading') {
-      console.log('[ChatGPT Analyst] Page will reload to capture fresh network traffic...');
+    if (response && response.action === 'refreshing') {
+      console.log('[ChatGPT Analyst] Page refresh initiated, network monitoring active...');
+    }
+  });
+}
+
+// Process captured network data from background script
+function processNetworkData(networkData) {
+  console.log('[ChatGPT Analyst] 🔍 Processing captured network data...');
+  
+  try {
+    const data = networkData.data;
+    
+    // Use existing analysis function to process the conversation data
+    const analysisData = extractSearchAndReasoning(data);
+    
+    if (analysisData.hasData) {
+      console.log('[ChatGPT Analyst] ✅ Found analysis data in network response:', {
+        searchQueries: analysisData.searchQueries.length,
+        thoughts: analysisData.thoughts.length,
+        reasoning: analysisData.reasoning.length,
+        source: networkData.source
+      });
+      
+      // Add network capture info to metadata
+      analysisData.metadata.captureMethod = networkData.source;
+      analysisData.metadata.captureUrl = networkData.url;
+      analysisData.metadata.captureTimestamp = new Date(networkData.timestamp).toISOString();
+      
+      showAnalysisResult(analysisData);
+      
+      // Clear refresh flag on success
+      chrome.runtime.sendMessage({
+        action: "clearRefreshFlag",
+        conversationId: networkData.conversationId
+      });
+      
+    } else {
+      console.log('[ChatGPT Analyst] No analysis data found in network response');
       showAnalysisResult({
         hasData: false,
         searchQueries: [],
         thoughts: [],
         reasoning: [],
-        isReloading: true
+        error: 'No search queries or internal reasoning found in this conversation. The conversation may not contain search-based interactions.',
+        metadata: {
+          captureMethod: networkData.source,
+          captureUrl: networkData.url,
+          dataSize: JSON.stringify(data).length
+        }
       });
     }
-  });
+    
+  } catch (error) {
+    console.error('[ChatGPT Analyst] Error processing network data:', error);
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      error: `Error processing network data: ${error.message}`
+    });
+  }
 }
 
 // Extract search queries and reasoning from conversation data
@@ -1032,14 +1045,16 @@ async function initializeChatGPTAnalyst() {
     contentDiv.innerHTML = `
       <div class="init-message">
         <h4>🔍 ChatGPT SEO Analyst Ready</h4>
-        <p>Extension is now monitoring this conversation.</p>
+        <p>Extension monitors Chrome network traffic to capture conversation data on page refresh.</p>
         <p><strong>How to use:</strong></p>
         <ul>
-          <li>Ask ChatGPT questions that require research</li>
-          <li>Press <kbd>Ctrl+Shift+A</kbd> to analyze current conversation</li>
-          <li>Press <kbd>Ctrl+Shift+S</kbd> to toggle this overlay</li>
+          <li>Navigate to any ChatGPT conversation</li>
+          <li>Click "Refresh & Analyze" to capture fresh network data</li>
+          <li>Use <kbd>Ctrl+Shift+A</kbd> for quick analysis</li>
+          <li>Use <kbd>Ctrl+Shift+S</kbd> to toggle this overlay</li>
         </ul>
-        <button class="analyze-btn" data-action="analyze">🔍 Analyze Now</button>
+        <p><small><strong>Note:</strong> Page will refresh automatically to capture network traffic.</small></p>
+        <button class="analyze-btn" data-action="analyze">🔄 Refresh & Analyze</button>
       </div>
     `;
     addPromotionalContent(contentDiv);
@@ -1067,8 +1082,7 @@ window.debugChatGPTAnalyst = function() {
   console.log('Overlay visible:', overlayVisible);
   console.log('Current data:', currentData);
   
-  // Try to trigger analysis immediately
-  console.log('🚀 Triggering analysis...');
+  console.log('🔄 Triggering network-based analysis (page will refresh)...');
   analyzeCurrentConversation();
 };
 
