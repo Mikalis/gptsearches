@@ -1050,91 +1050,176 @@ function loadAnalysisFromLocalStorage() {
 
 // Extract search queries and reasoning from conversation data
 function extractSearchAndReasoning(data) {
+  console.log('[ChatGPT Analyst] Extracting search queries and reasoning from data...');
+  
+  // Initialize results
   const result = {
     hasData: false,
     searchQueries: [],
     thoughts: [],
     reasoning: [],
     metadata: {
-      conversationTitle: data.title || 'Untitled Conversation',
-      lastUpdate: data.update_time ? new Date(data.update_time * 1000).toISOString() : null,
-      totalMessages: 0
+      timestamp: new Date().toISOString(),
+      version: '1.0.0'
     }
   };
   
-  if (!data || !data.mapping) {
-    return result;
-  }
-  
-  // Count total messages
-  result.metadata.totalMessages = Object.keys(data.mapping).filter(
-    nodeId => data.mapping[nodeId].message && data.mapping[nodeId].message.author
-  ).length;
-  
-  // Process each node in the conversation mapping
-  for (const nodeId in data.mapping) {
-    const node = data.mapping[nodeId];
-    
-    if (!node.message || !node.message.author) continue;
-    
-    const message = node.message;
-    
-    // Extract search queries from metadata
-    if (message.metadata && message.metadata.search_queries && message.metadata.search_queries.length > 0) {
-      message.metadata.search_queries.forEach(query => {
-        result.searchQueries.push({
-          query: typeof query === 'string' ? query : query.q || query.query || 'Unknown query',
-          timestamp: message.create_time ? new Date(message.create_time * 1000).toISOString() : null,
-          messageId: nodeId,
-          author: message.author.role
-        });
-      });
-      result.hasData = true;
+  try {
+    // Check if data exists
+    if (!data || typeof data !== 'object') {
+      console.log('[ChatGPT Analyst] No valid data to analyze');
+      return result;
     }
     
-    // Extract thoughts from content
-    if (message.content && message.content.content_type === 'thoughts' && message.content.thoughts) {
-      message.content.thoughts.forEach(thought => {
-        result.thoughts.push({
-          summary: thought.summary || null,
-          content: thought.content || thought.text || 'No content',
-          timestamp: message.create_time ? new Date(message.create_time * 1000).toISOString() : null,
-          messageId: nodeId,
-          author: message.author.role
-        });
-      });
-      result.hasData = true;
+    // Log data structure for debugging
+    const dataKeys = Object.keys(data);
+    console.log('[ChatGPT Analyst] Data structure keys:', dataKeys);
+    
+    // Check for conversation not found error
+    if (data.detail === 'conversation_not_found' || 
+        (data.detail && data.detail.includes('not found'))) {
+      console.log('[ChatGPT Analyst] Conversation not found error detected');
+      result.error = 'This conversation is no longer available. It may have expired or been deleted.';
+      result.isConversationNotFound = true;
+      return result;
     }
     
-    // Extract reasoning from assistant messages (look for specific patterns)
-    if (message.author.role === 'assistant' && message.content && message.content.parts) {
-      message.content.parts.forEach(part => {
-        if (typeof part === 'string' && part.length > 0) {
-          // Look for reasoning patterns in the text
-          const reasoningIndicators = [
-            /I need to search for/i,
-            /Let me search for/i,
-            /I'll look up/i,
-            /Based on my search/i,
-            /From my research/i,
-            /I should find/i
-          ];
+    // Extract mapping data
+    const mapping = data.mapping || {};
+    const mappingKeys = Object.keys(mapping);
+    console.log('[ChatGPT Analyst] Found mapping with', mappingKeys.length, 'keys');
+    
+    // Process each message in the mapping
+    for (const key of mappingKeys) {
+      const node = mapping[key];
+      
+      // Skip non-message nodes
+      if (!node || !node.message || node.message.author?.role !== 'assistant') {
+        continue;
+      }
+      
+      const message = node.message;
+      const timestamp = new Date(message.create_time * 1000).toISOString();
+      
+      // Extract search queries from tool calls
+      if (message.tool_calls && Array.isArray(message.tool_calls)) {
+        message.tool_calls.forEach(toolCall => {
+          if (toolCall.type === 'browser' && toolCall.browser?.type === 'search') {
+            result.searchQueries.push({
+              query: toolCall.browser.query || toolCall.browser.text || toolCall.browser.input || '',
+              timestamp: timestamp
+            });
+            result.hasData = true;
+          }
+        });
+      }
+      
+      // Extract search queries from content blocks
+      if (message.content && Array.isArray(message.content)) {
+        message.content.forEach(content => {
+          // Check for browser_search content
+          if (content.browser_search) {
+            result.searchQueries.push({
+              query: content.browser_search.query || content.browser_search.text || '',
+              timestamp: timestamp
+            });
+            result.hasData = true;
+          }
           
-          reasoningIndicators.forEach(pattern => {
-            if (pattern.test(part)) {
-              result.reasoning.push({
-                text: part.substring(0, 500) + (part.length > 500 ? '...' : ''),
-                type: 'search_reasoning',
-                timestamp: message.create_time ? new Date(message.create_time * 1000).toISOString() : null,
-                messageId: nodeId,
-                author: message.author.role
-              });
-              result.hasData = true;
-            }
-          });
-        }
-      });
+          // Check for tool_use content with search
+          if (content.tool_use && content.tool_use.tool_name === 'browser' && 
+              content.tool_use.tool_parameters && 
+              (content.tool_use.tool_parameters.query || content.tool_use.tool_parameters.text)) {
+            result.searchQueries.push({
+              query: content.tool_use.tool_parameters.query || content.tool_use.tool_parameters.text || '',
+              timestamp: timestamp
+            });
+            result.hasData = true;
+          }
+        });
+      }
+      
+      // Extract internal thoughts
+      if (message.metadata && message.metadata.thinking) {
+        result.thoughts.push({
+          thought: message.metadata.thinking,
+          timestamp: timestamp
+        });
+        result.hasData = true;
+      }
+      
+      // Extract reasoning from content blocks
+      if (message.content && Array.isArray(message.content)) {
+        message.content.forEach(content => {
+          if (content.thinking_process || content.reasoning || 
+              (content.text && content.text.includes('My reasoning:'))) {
+            result.reasoning.push({
+              reasoning: content.thinking_process || content.reasoning || content.text,
+              timestamp: timestamp
+            });
+            result.hasData = true;
+          }
+        });
+      }
     }
+    
+    // Look for search queries in the raw data as a fallback
+    const jsonString = JSON.stringify(data);
+    
+    // Search for search patterns in the raw JSON
+    const searchPatterns = [
+      /"browser_search":\s*{\s*"query":\s*"([^"]+)"/g,
+      /"browser":\s*{\s*"query":\s*"([^"]+)"/g,
+      /"tool_use":\s*{\s*"tool_name":\s*"browser"[^}]*"query":\s*"([^"]+)"/g,
+      /"search_query":\s*"([^"]+)"/g,
+      /"search":\s*{\s*"query":\s*"([^"]+)"/g
+    ];
+    
+    for (const pattern of searchPatterns) {
+      let match;
+      while ((match = pattern.exec(jsonString)) !== null) {
+        const query = match[1];
+        if (query && !result.searchQueries.some(q => q.query === query)) {
+          result.searchQueries.push({
+            query: query,
+            timestamp: new Date().toISOString(),
+            source: 'pattern_match'
+          });
+          result.hasData = true;
+        }
+      }
+    }
+    
+    // Look for thinking patterns in the raw JSON
+    const thinkingPatterns = [
+      /"thinking":\s*"([^"]+)"/g,
+      /"thinking_process":\s*"([^"]+)"/g,
+      /"reasoning":\s*"([^"]+)"/g
+    ];
+    
+    for (const pattern of thinkingPatterns) {
+      let match;
+      while ((match = pattern.exec(jsonString)) !== null) {
+        const thought = match[1];
+        if (thought && !result.thoughts.some(t => t.thought === thought)) {
+          result.thoughts.push({
+            thought: thought,
+            timestamp: new Date().toISOString(),
+            source: 'pattern_match'
+          });
+          result.hasData = true;
+        }
+      }
+    }
+    
+    console.log('[ChatGPT Analyst] Extraction complete:', {
+      searchQueries: result.searchQueries.length,
+      thoughts: result.thoughts.length,
+      reasoning: result.reasoning.length
+    });
+    
+  } catch (error) {
+    console.error('[ChatGPT Analyst] Error extracting data:', error);
   }
   
   return result;
