@@ -1150,7 +1150,78 @@ function initializeExtension() {
   // Create overlay immediately
   createOverlay();
   
-  // Show a welcome message to test if overlay is working
+  // Check for intercepted data from background script
+  checkForInterceptedData();
+  
+  // Set up overlay persistence
+  setupOverlayPersistence();
+  
+  console.log('[ChatGPT Analyst] Extension initialized successfully');
+}
+
+// Check for intercepted data from background script
+function checkForInterceptedData() {
+  const conversationId = getCurrentConversationId();
+  if (!conversationId) {
+    // Show welcome message if no conversation ID
+    setTimeout(() => {
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        isLoading: false,
+        showWelcome: true
+      });
+    }, 1000);
+    return;
+  }
+  
+  console.log('[ChatGPT Analyst] Checking for intercepted data for conversation:', conversationId);
+  
+  // Check chrome.storage.local for intercepted data
+  const storageKey = `chatgpt_analyst_data_${conversationId}`;
+  chrome.storage.local.get([storageKey], (result) => {
+    if (chrome.runtime.lastError) {
+      console.error('[ChatGPT Analyst] Error accessing storage:', chrome.runtime.lastError);
+      showWelcomeMessage();
+      return;
+    }
+    
+    const storageData = result[storageKey];
+    if (storageData && storageData.data) {
+      console.log('[ChatGPT Analyst] 🎉 Found intercepted data in storage!');
+      
+      // Process the intercepted data
+      processNetworkData({
+        action: 'networkData',
+        source: storageData.source || 'storage_retrieval',
+        url: storageData.url,
+        conversationId: storageData.conversationId,
+        timestamp: Date.now(),
+        data: storageData.data
+      });
+      
+      // Clear the storage data after processing
+      chrome.storage.local.remove([storageKey], () => {
+        console.log('[ChatGPT Analyst] Cleared processed data from storage');
+      });
+      
+    } else {
+      // Try localStorage as fallback
+      const existingData = loadAnalysisFromLocalStorage();
+      if (existingData && existingData.hasData) {
+        console.log('[ChatGPT Analyst] Found existing analysis data in localStorage');
+        showAnalysisResult(existingData);
+      } else {
+        showWelcomeMessage();
+      }
+    }
+  });
+}
+
+// Show welcome message
+function showWelcomeMessage() {
   setTimeout(() => {
     showAnalysisResult({
       hasData: false,
@@ -1161,16 +1232,4 @@ function initializeExtension() {
       showWelcome: true
     });
   }, 1000);
-  
-  // Set up overlay persistence
-  setupOverlayPersistence();
-  
-  // Try to load existing analysis data
-  const existingData = loadAnalysisFromLocalStorage();
-  if (existingData && existingData.hasData) {
-    console.log('[ChatGPT Analyst] Found existing analysis data, displaying...');
-    showAnalysisResult(existingData);
-  }
-  
-  console.log('[ChatGPT Analyst] Extension initialized successfully');
 } 

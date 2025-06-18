@@ -169,7 +169,28 @@ function setupNetworkInterception(tabId, conversationId) {
                    
                    // Only process if this looks like a real conversation (has mapping)
                    if (jsonData.mapping && Object.keys(jsonData.mapping).length > 0) {
-                     // Send the intercepted data to content script
+                     // Save the data to localStorage as backup
+                     const storageKey = `chatgpt_analyst_data_${conversationId}`;
+                     const storageData = {
+                       timestamp: new Date().toISOString(),
+                       conversationId: conversationId,
+                       source: 'network_interception',
+                       url: url,
+                       data: jsonData
+                     };
+                     
+                     try {
+                       // Use chrome.storage.local for cross-context access
+                       chrome.storage.local.set({
+                         [storageKey]: storageData
+                       }, () => {
+                         console.log('[ChatGPT Analyst] 💾 Saved intercepted data to storage for:', conversationId);
+                       });
+                     } catch (storageError) {
+                       console.error('[ChatGPT Analyst] Error saving to storage:', storageError);
+                     }
+                     
+                     // Try to send to content script (might fail if page reloaded)
                      chrome.tabs.sendMessage(tabId, {
                        action: 'networkData',
                        source: 'network_interception',
@@ -177,6 +198,12 @@ function setupNetworkInterception(tabId, conversationId) {
                        conversationId: conversationId,
                        timestamp: Date.now(),
                        data: jsonData
+                     }, (response) => {
+                       if (chrome.runtime.lastError) {
+                         console.log('[ChatGPT Analyst] Content script not available (page reload?), data saved to storage');
+                       } else {
+                         console.log('[ChatGPT Analyst] Successfully sent data to content script');
+                       }
                      });
                      
                      // Clean up after successful interception
