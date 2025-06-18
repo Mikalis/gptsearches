@@ -719,9 +719,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   switch (request.action) {
     case 'analyzeConversation':
-      // Manual analysis trigger - try direct API call as fallback
-      analyzeCurrentConversation();
-      sendResponse({ status: 'success', timestamp: Date.now() });
+      console.log('[ChatGPT Analyst] Starting analysis...');
+      analyzeConversationWithDebugger(request.manual || false);
+      sendResponse({ status: 'success' });
       break;
       
     case 'toggleOverlay':
@@ -767,13 +767,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       console.error('[ChatGPT Analyst] Debugger error:', request.error);
       // Only show error if we haven't received data yet
       if (!dataReceived) {
-        showAnalysisResult({
-          hasData: false,
-          searchQueries: [],
-          thoughts: [],
-          reasoning: [],
-          error: request.error
-        });
+        // If it's a timeout and we need fresh data, refresh the page
+        if (request.error.includes('Timeout') || request.error.includes('message port closed')) {
+          console.log('[ChatGPT Analyst] Refreshing page due to debugger timeout...');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        } else {
+          showAnalysisResult({
+            hasData: false,
+            searchQueries: [],
+            thoughts: [],
+            reasoning: [],
+            error: request.error
+          });
+        }
       } else {
         console.log('[ChatGPT Analyst] Ignoring debugger error because data was already received');
       }
@@ -841,82 +849,60 @@ function getCurrentConversationId() {
   return match ? match[1] : null;
 }
 
-// NETWORK MONITORING APPROACH: Refresh page and capture JSON from network traffic
-function analyzeCurrentConversation() {
+// Analyze conversation with debugger-based approach
+function analyzeConversationWithDebugger(manual = false) {
   console.log('[ChatGPT Analyst] 🔄 Starting debugger-based analysis...');
   console.log('[ChatGPT Analyst] Current URL:', window.location.href);
   
+  // Update UI to show loading state
+  showAnalysisResult({
+    isLoading: true,
+    hasData: false,
+    searchQueries: [],
+    thoughts: [],
+    reasoning: []
+  });
+  
+  // Extract conversation ID from current URL
   const conversationId = getCurrentConversationId();
   
   if (!conversationId) {
-    console.log('[ChatGPT Analyst] No conversation ID found in URL');
+    console.log('[ChatGPT Analyst] ❌ No conversation ID found in URL');
     showAnalysisResult({
       hasData: false,
       searchQueries: [],
       thoughts: [],
       reasoning: [],
-      error: 'Not in a ChatGPT conversation. Please navigate to a ChatGPT conversation first.'
+      error: 'No conversation ID found in URL. Please make sure you are on a ChatGPT conversation page.'
     });
     return;
   }
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
-  console.log('[ChatGPT Analyst] Will attach debugger to capture network traffic...');
+  console.log('[ChatGPT Analyst] Will refresh page to capture network traffic...');
   
-  // Show loading state
-  showAnalysisResult({
-    hasData: false,
-    searchQueries: [],
-    thoughts: [],
-    reasoning: [],
-    isLoading: true
-  });
-  
-  // Try direct fetch first as a test
-  fetch(`https://chatgpt.com/backend-api/conversation/${conversationId}`, {
-    credentials: 'include',
-    headers: {
-      'Accept': 'application/json'
-    }
-  })
-  .then(response => {
-    console.log('[ChatGPT Analyst] Test fetch response:', response.status, response.statusText);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    return response.json();
-  })
-  .then(data => {
-    console.log('[ChatGPT Analyst] Direct fetch successful!', data);
-    processNetworkData({
-      data: data,
-      conversationId: conversationId,
-      url: `https://chatgpt.com/backend-api/conversation/${conversationId}`,
-      timestamp: Date.now(),
-      source: 'direct_fetch'
-    });
-  })
-  .catch(error => {
-    console.log('[ChatGPT Analyst] Direct fetch failed, using debugger capture:', error.message);
+  // Send message to background script to start debugger capture
+  chrome.runtime.sendMessage({
+    action: 'analyzeConversation',
+    conversationId: conversationId,
+    manual: manual
+  }).then(response => {
+    console.log('[ChatGPT Analyst] Background script response:', response);
     
-    // Request debugger capture from background script
-    try {
-      chrome.runtime.sendMessage({
-        action: "debuggerCapture",
-        conversationId: conversationId
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          console.error('[ChatGPT Analyst] Debugger capture error:', chrome.runtime.lastError.message);
-          handleDebuggerCaptureError(chrome.runtime.lastError.message);
-          return;
-        }
-        
-        console.log('[ChatGPT Analyst] Debugger capture initiated:', response);
-      });
-    } catch (err) {
-      console.error('[ChatGPT Analyst] Error sending message to background script:', err);
-      handleDebuggerCaptureError(err.message);
-    }
+    // Refresh the page to trigger network requests that the debugger can capture
+    setTimeout(() => {
+      console.log('[ChatGPT Analyst] Refreshing page to capture fresh network traffic...');
+      window.location.reload();
+    }, 500);
+    
+  }).catch(error => {
+    console.log('[ChatGPT Analyst] Background script communication error:', error);
+    
+    // Fallback: refresh anyway
+    setTimeout(() => {
+      console.log('[ChatGPT Analyst] Refreshing page to capture fresh network traffic (fallback)...');
+      window.location.reload();
+    }, 500);
   });
 }
 
@@ -1248,120 +1234,9 @@ function showAnalysisResult(result) {
 
 // Clean up function - no longer needed with direct API approach
 
-// Initialize the extension
-async function initializeChatGPTAnalyst() {
-  console.log('[ChatGPT Analyst] Initializing extension...');
-  
-  // Reset data received flag on new page
-  dataReceived = false;
-  
-  try {
-    // Wait for page to be ready
-    await waitForPageReady();
-    
-    // Start observing for new messages
-    observeForNewMessages();
-    
-    // Create overlay initially hidden
-    createOverlay();
-    hideOverlay();
-  } catch (error) {
-    console.error('[ChatGPT Analyst] Error during initialization:', error);
-    // Try to create overlay anyway
-    createOverlay();
-  }
-  
-  // Show initial message and auto-show overlay
-  const contentDiv = document.getElementById(CONFIG.contentId);
-  if (contentDiv) {
-    contentDiv.innerHTML = `
-      <div class="init-message">
-        <h4>🔍 ChatGPT SEO Analyst Ready</h4>
-        <p>Extension uses Chrome Debugger API to capture conversation data without page refresh.</p>
-        <p><strong>How to use:</strong></p>
-        <ul>
-          <li>Navigate to any ChatGPT conversation</li>
-          <li>Click "Analyze Conversation" to capture network data</li>
-          <li>Use <kbd>Ctrl+Shift+A</kbd> for quick analysis</li>
-          <li>Use <kbd>Ctrl+Shift+S</kbd> to toggle this overlay</li>
-        </ul>
-        <p><small><strong>Note:</strong> You may see a "Debugger attached" notification - this is normal and required to access the network data.</small></p>
-        <button class="analyze-btn" data-action="analyze">🔍 Analyze Conversation</button>
-      </div>
-    `;
-    addPromotionalContent(contentDiv);
-  }
-  
-  // Auto-show overlay on ChatGPT pages
-  if (window.location.hostname.includes('chatgpt.com')) {
-    setTimeout(() => {
-      showOverlay();
-    }, 1000);
-  }
-  
-  // Create debug commands
-  window.testChatGPTAnalystOverlay = () => {
-    testOverlay();
-  };
-  
-  window.debugChatGPTAnalyst = () => {
-    debugAnalysis();
-  };
-  
-  // Set up mutation observer to ensure overlay persists
-  setupOverlayPersistence();
-  
-  console.log('[ChatGPT Analyst] Debug commands available:');
-  console.log('- window.testChatGPTAnalystOverlay() - Test overlay display');
-  console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
-  
-  // Disable auto-analysis to prevent reload loops
-  console.log('[ChatGPT Analyst] Auto-analysis disabled to prevent reload loops - use manual analysis instead');
-  
-  console.log('[ChatGPT Analyst] Extension initialized successfully');
-}
 
-// Initialize when page is ready
-initializeChatGPTAnalyst();
 
-// Add global test function for debugging
-window.testChatGPTAnalystOverlay = function() {
-  console.log('[ChatGPT Analyst] Manual overlay test triggered');
-  window.postMessage({
-    type: 'TEST_OVERLAY'
-  }, '*');
-};
-
-window.debugChatGPTAnalyst = function() {
-  console.log('[ChatGPT Analyst] 🔍 Debug Information:');
-  console.log('Current URL:', window.location.href);
-  console.log('Conversation ID:', getCurrentConversationId());
-  console.log('Overlay exists:', !!overlayElement);
-  console.log('Overlay visible:', overlayVisible);
-  console.log('Current data:', currentData);
-  
-  console.log('🔄 Triggering network-based analysis (page will refresh)...');
-  analyzeCurrentConversation();
-};
-
-console.log('[ChatGPT Analyst] Debug commands available:');
-console.log('- window.testChatGPTAnalystOverlay() - Test overlay display');
-console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
-
-// Force show overlay for debugging
-window.forceShowOverlay = function() {
-  console.log('[ChatGPT Analyst] Force showing overlay...');
-  if (!overlayElement) {
-    createOverlay();
-  }
-  showOverlay();
-  console.log('Overlay element exists:', !!overlayElement);
-  console.log('Overlay visible:', overlayVisible);
-};
-
-// Legacy functions removed - no longer needed with direct API approach
-// These functions violated CSP by injecting inline scripts
-// Global functions removed - using event delegation to avoid CSP violations 
+ 
 
 // Setup mutation observer to ensure overlay persists
 function setupOverlayPersistence() {
@@ -1444,8 +1319,21 @@ function debugAnalysis() {
   });
 }
 
+// Initialize extension on page load
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeExtension);
+} else {
+  initializeExtension();
+}
+
 // Initialize extension
 function initializeExtension() {
+  // Prevent double initialization
+  if (window.chatgptAnalystInitialized) {
+    return;
+  }
+  window.chatgptAnalystInitialized = true;
+  
   console.log('[ChatGPT Analyst] Initializing extension...');
   
   // Reset data received flag on new page
