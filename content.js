@@ -79,6 +79,23 @@ function createOverlay() {
   document.body.appendChild(overlay);
   overlayElement = overlay;
   
+  // Add event delegation for button clicks to avoid CSP violations
+  overlay.addEventListener('click', (event) => {
+    const target = event.target;
+    const action = target.getAttribute('data-action');
+    
+    if (action === 'analyze') {
+      event.preventDefault();
+      analyzeCurrentConversation();
+    } else if (action === 'copy') {
+      event.preventDefault();
+      const text = target.getAttribute('data-text');
+      if (text) {
+        copyToClipboard(text);
+      }
+    }
+  });
+  
   console.log('[ChatGPT Analyst] Overlay created');
   return overlay;
 }
@@ -168,7 +185,7 @@ function createSearchQueriesDisplaySection(searchQueries) {
     listItem.innerHTML = `
       <span class="query-number">${index + 1}.</span>
       <span class="query-text">${escapeHtml(queryData.query)}</span>
-      <button class="copy-btn" onclick="copyToClipboard('${escapeHtml(queryData.query)}')" title="Copy query">📋</button>
+      <button class="copy-btn" data-action="copy" data-text="${escapeHtml(queryData.query)}" title="Copy query">📋</button>
       ${queryData.timestamp ? `<span class="query-time">${new Date(queryData.timestamp).toLocaleTimeString()}</span>` : ''}
     `;
     queriesList.appendChild(listItem);
@@ -467,10 +484,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
-// Global function for retry button
-window.chatgptAnalyzeConversation = function() {
-  analyzeCurrentConversation();
-};
+// Global function removed - using event delegation to avoid CSP violations
 
 // Keyboard shortcut handler
 document.addEventListener('keydown', (event) => {
@@ -521,15 +535,60 @@ async function fetchConversationData(conversationId) {
     const apiUrl = `https://chatgpt.com/backend-api/conversation/${conversationId}`;
     console.log('[ChatGPT Analyst] Fetching conversation data from:', apiUrl);
     
-    const response = await fetch(apiUrl, {
-      credentials: 'include',
-      headers: {
-        'Accept': 'application/json',
+    // Try to get CSRF token from meta tag or cookies
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || 
+                     getCookie('_csrf') || 
+                     getCookie('csrftoken');
+    
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    };
+    
+    // Add CSRF token if available
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
+    }
+    
+    // Try to get authorization token from localStorage
+    try {
+      const authToken = localStorage.getItem('auth_token') || 
+                       localStorage.getItem('access_token') ||
+                       sessionStorage.getItem('auth_token');
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
       }
+    } catch (e) {
+      // Ignore localStorage access errors
+    }
+    
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      credentials: 'include',
+      headers: headers,
+      cache: 'no-cache'
     });
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      // If 404, try alternative endpoint patterns
+      if (response.status === 404) {
+        console.log('[ChatGPT Analyst] Trying alternative API endpoint...');
+        const alternativeUrl = `https://chatgpt.com/backend-api/conversations/${conversationId}`;
+        const altResponse = await fetch(alternativeUrl, {
+          method: 'GET',
+          credentials: 'include',
+          headers: headers,
+          cache: 'no-cache'
+        });
+        
+        if (altResponse.ok) {
+          const data = await altResponse.json();
+          console.log('[ChatGPT Analyst] Successfully fetched conversation data from alternative endpoint');
+          return data;
+        }
+      }
+      
+      throw new Error(`HTTP ${response.status}: ${response.statusText || 'API endpoint not accessible'}`);
     }
     
     const data = await response.json();
@@ -540,6 +599,14 @@ async function fetchConversationData(conversationId) {
     console.error('[ChatGPT Analyst] Error fetching conversation data:', error);
     throw error;
   }
+}
+
+// Helper function to get cookie value
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
 }
 
 // Main function to analyze current conversation
@@ -729,7 +796,7 @@ function showAnalysisResult(analysisData) {
       <div class="error-message">
         <h4>⚠️ Analysis Error</h4>
         <p>${escapeHtml(analysisData.error)}</p>
-        <button class="retry-btn" onclick="window.chatgptAnalyzeConversation()">🔄 Retry Analysis</button>
+        <button class="retry-btn" data-action="analyze">🔄 Retry Analysis</button>
       </div>
     `;
     addPromotionalContent(contentDiv);
@@ -825,7 +892,7 @@ async function initializeChatGPTAnalyst() {
           <li>Press <kbd>Ctrl+Shift+A</kbd> to analyze current conversation</li>
           <li>Press <kbd>Ctrl+Shift+S</kbd> to toggle this overlay</li>
         </ul>
-        <button class="analyze-btn" onclick="window.chatgptAnalyzeConversation()">🔍 Analyze Now</button>
+        <button class="analyze-btn" data-action="analyze">🔍 Analyze Now</button>
       </div>
     `;
     addPromotionalContent(contentDiv);
@@ -839,6 +906,4 @@ initializeChatGPTAnalyst();
 
 // Legacy functions removed - no longer needed with direct API approach
 // These functions violated CSP by injecting inline scripts
-
-// Global functions for inline event handlers
-window.copyToClipboard = copyToClipboard; 
+// Global functions removed - using event delegation to avoid CSP violations 
