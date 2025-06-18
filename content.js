@@ -430,6 +430,14 @@ window.addEventListener('message', (event) => {
     if (event.data.type === 'CHATGPT_CONVERSATION_DATA') {
       console.log('[ChatGPT Analyst] Received intercepted conversation data:', event.data.url);
       
+      // Clear reload flag if successful
+      if (event.data.success) {
+        chrome.runtime.sendMessage({
+          action: "clearReloadFlag",
+          conversationId: event.data.conversationId
+        });
+      }
+      
       try {
         const conversationData = event.data.data;
         console.log('[ChatGPT Analyst] Processing intercepted conversation data...');
@@ -548,9 +556,11 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-// Auto-trigger analysis when page content changes (new messages)
+// Auto-trigger analysis when page content changes (new messages) - DISABLED to prevent reload loops
 let lastMessageCount = 0;
 function observeForNewMessages() {
+  console.log('[ChatGPT Analyst] Auto-analysis disabled to prevent reload loops - use manual analysis instead');
+  /*
   const observer = new MutationObserver((mutations) => {
     // Check if new message elements were added
     const messageElements = document.querySelectorAll('[data-message-author-role]');
@@ -568,6 +578,7 @@ function observeForNewMessages() {
     childList: true,
     subtree: true
   });
+  */
 }
 
 // Extract conversation ID from current URL

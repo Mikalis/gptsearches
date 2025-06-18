@@ -185,6 +185,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     if (conversationId) {
       console.log(`[ChatGPT Analyst] Manual analysis requested for: ${conversationId}`);
+      
+      // Check if we're already in a reload cycle for this tab
+      if (capturedConversationData[tabId] && capturedConversationData[tabId].isReloading) {
+        console.log(`[ChatGPT Analyst] Already reloading tab ${tabId}, skipping...`);
+        sendResponse({ error: 'Page is already reloading, please wait...' });
+        return true;
+      }
+      
+      // Mark this tab as being reloaded
+      capturedConversationData[tabId] = {
+        isReloading: true,
+        conversationId: conversationId,
+        startTime: Date.now()
+      };
+      
       console.log(`[ChatGPT Analyst] Will reload page to capture fresh network traffic`);
       
       // First, inject our interceptor
@@ -199,11 +214,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.tabs.reload(tabId);
       }, 500);
       
+      // Clear reload flag after 30 seconds to prevent permanent blocking
+      setTimeout(() => {
+        if (capturedConversationData[tabId] && capturedConversationData[tabId].isReloading) {
+          console.log(`[ChatGPT Analyst] Clearing reload flag for tab ${tabId} after timeout`);
+          delete capturedConversationData[tabId];
+        }
+      }, 30000);
+      
       sendResponse({ success: true, conversationId: conversationId, action: 'reloading' });
     } else {
       sendResponse({ error: 'No conversation ID found in current URL' });
     }
     
+    return true;
+  } else if (request.action === "clearReloadFlag" && sender.tab) {
+    const tabId = sender.tab.id;
+    console.log(`[ChatGPT Analyst] Clearing reload flag for tab ${tabId} - data successfully captured`);
+    delete capturedConversationData[tabId];
+    sendResponse({ success: true });
     return true;
   }
 });
@@ -240,17 +269,18 @@ function setupNetworkInterception() {
               title: data.title
             });
             
-            // Send success data
-            window.postMessage({
-              type: 'CHATGPT_CONVERSATION_DATA',
-              data: data,
-              conversationId: conversationId,
-              url: url,
-              timestamp: Date.now()
-            }, '*');
-            
-            // Restore fetch
-            window.fetch = originalFetch;
+                         // Send success data
+             window.postMessage({
+               type: 'CHATGPT_CONVERSATION_DATA',
+               data: data,
+               conversationId: conversationId,
+               url: url,
+               timestamp: Date.now(),
+               success: true
+             }, '*');
+             
+             // Restore fetch
+             window.fetch = originalFetch;
           }
         }).catch(() => {
           // Not JSON, ignore
