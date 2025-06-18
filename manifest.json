@@ -21,7 +21,8 @@
   "permissions": [
     "storage",
     "tabs",
-    "debugger"
+    "debugger",
+    "downloads"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",
