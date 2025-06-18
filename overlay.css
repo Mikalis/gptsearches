@@ -454,6 +454,7 @@
 /* Action Buttons */
 .action-buttons, .error-actions {
   display: flex;
+  flex-direction: column;
   gap: 12px;
   margin-top: 20px;
   justify-content: center;
@@ -489,6 +490,29 @@
 .new-conversation-btn:hover {
   background: linear-gradient(135deg, #66bb6a, #4caf50);
   box-shadow: 0 4px 12px rgba(129, 199, 132, 0.3);
+}
+
+.btn-secondary {
+  background: rgba(232, 234, 237, 0.1);
+  color: #e8eaed;
+  border: 1px solid rgba(232, 234, 237, 0.2);
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-secondary:hover {
+  background: rgba(232, 234, 237, 0.15);
+  border-color: rgba(232, 234, 237, 0.3);
+  transform: translateY(-1px);
 }
 
 /* Export Section */

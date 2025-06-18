@@ -169,22 +169,25 @@ function setupNetworkInterception(tabId, conversationId) {
                    
                    // Only process if this looks like a real conversation (has mapping)
                    if (jsonData.mapping && Object.keys(jsonData.mapping).length > 0) {
-                     // Save the data to localStorage as backup
-                     const storageKey = `chatgpt_analyst_data_${conversationId}`;
+                     // Save the conversation data with the key the content script expects
                      const storageData = {
                        timestamp: new Date().toISOString(),
                        conversationId: conversationId,
                        source: 'network_interception',
                        url: url,
-                       data: jsonData
+                       title: jsonData.title || 'Untitled Conversation',
+                       dataSize: body.length
                      };
                      
                      try {
-                       // Use chrome.storage.local for cross-context access
+                       // Save both the raw conversation data and metadata
                        chrome.storage.local.set({
-                         [storageKey]: storageData
+                         'conversationData': jsonData,  // The key content script looks for
+                         'conversationMetadata': storageData,
+                         [`chatgpt_analyst_data_${conversationId}`]: storageData  // Keep backup
                        }, () => {
                          console.log('[ChatGPT Analyst] 💾 Saved intercepted data to storage for:', conversationId);
+                         console.log('[ChatGPT Analyst] 📊 Data keys saved: conversationData, conversationMetadata');
                        });
                      } catch (storageError) {
                        console.error('[ChatGPT Analyst] Error saving to storage:', storageError);

@@ -16,13 +16,64 @@ function initializeOverlay() {
   createOverlay();
   displayAnalysisData();
   
+  // Check for existing data every 3 seconds (in case we missed the storage event)
+  setInterval(() => {
+    checkForNewData();
+  }, 3000);
+  
   // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local' && changes.conversationData) {
-      console.log('📊 Conversation data updated, refreshing display');
-      displayAnalysisData();
+    if (namespace === 'local') {
+      if (changes.conversationData) {
+        console.log('📊 Conversation data updated, refreshing display');
+        showNotification('📊 New conversation data detected!');
+        setTimeout(() => {
+          displayAnalysisData();
+        }, 500);
+      }
+      
+      if (changes.analysisData) {
+        console.log('🔍 Analysis data updated, refreshing display');
+        displayAnalysisData();
+      }
     }
   });
+}
+
+async function checkForNewData() {
+  try {
+    const result = await chrome.storage.local.get(['conversationData', 'analysisData', 'conversationMetadata']);
+    
+    if (result.conversationData && !result.analysisData) {
+      console.log('🔍 Found new conversation data without analysis - processing...');
+      const analysis = extractSearchAndReasoning(result.conversationData);
+      
+      if (analysis.searchQueries.length > 0 || analysis.thoughts.length > 0 || 
+          analysis.sources.length > 0 || analysis.reasoning.length > 0) {
+        
+        await chrome.storage.local.set({ analysisData: analysis });
+        console.log('✅ Auto-processed conversation data:', {
+          queries: analysis.searchQueries.length,
+          thoughts: analysis.thoughts.length,
+          sources: analysis.sources.length,
+          reasoning: analysis.reasoning.length
+        });
+        
+        showNotification(`🎉 Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts!`);
+        displayAnalysisData();
+      }
+    }
+    
+    if (result.conversationMetadata) {
+      console.log('📋 Conversation metadata:', {
+        title: result.conversationMetadata.title,
+        timestamp: result.conversationMetadata.timestamp,
+        source: result.conversationMetadata.source
+      });
+    }
+  } catch (error) {
+    // Silent fail for background check
+  }
 }
 
 function createOverlay() {
@@ -331,7 +382,10 @@ function createWelcomeMessage() {
         </ol>
       </div>
       <div class="action-buttons">
-        <button class="primary-btn" data-action="refresh-page">
+        <button class="primary-btn" data-action="force-analyze">
+          🔍 Force Analyze
+        </button>
+        <button class="btn-secondary" data-action="refresh-page">
           🔄 Refresh Page
         </button>
       </div>
@@ -572,6 +626,10 @@ function handleContentClick(event) {
       }, 500);
       break;
       
+    case 'force-analyze':
+      forceAnalyzeData();
+      break;
+      
     default:
       console.warn('❓ Unknown action:', action);
       break;
@@ -711,6 +769,82 @@ function handleRefreshClick() {
   });
 }
 
+async function forceAnalyzeData() {
+  try {
+    showNotification('🔍 Force analyzing all available data...');
+    console.log('🔍 Force analyze triggered');
+    
+    // Get all storage data
+    const allData = await chrome.storage.local.get(null);
+    console.log('📦 All storage keys found:', Object.keys(allData));
+    
+    let foundData = null;
+    let dataSource = '';
+    
+    // Check for conversation data first
+    if (allData.conversationData) {
+      foundData = allData.conversationData;
+      dataSource = 'conversationData';
+      console.log('✅ Found conversationData');
+    } else {
+      // Look for any conversation data with different keys
+      const conversationKeys = Object.keys(allData).filter(key => 
+        key.includes('chatgpt_analyst_data_') && allData[key].data
+      );
+      
+      if (conversationKeys.length > 0) {
+        const latestKey = conversationKeys[conversationKeys.length - 1];
+        foundData = allData[latestKey].data;
+        dataSource = latestKey;
+        console.log('✅ Found conversation data in:', latestKey);
+        
+        // Also save it to the standard key
+        await chrome.storage.local.set({ conversationData: foundData });
+        console.log('💾 Copied data to conversationData key');
+      }
+    }
+    
+    if (foundData) {
+      console.log('🔍 Processing conversation data from:', dataSource);
+      console.log('📊 Data info:', {
+        hasMapping: !!foundData.mapping,
+        title: foundData.title || 'No title',
+        mappingSize: foundData.mapping ? Object.keys(foundData.mapping).length : 0
+      });
+      
+      const analysis = extractSearchAndReasoning(foundData);
+      
+      await chrome.storage.local.set({ analysisData: analysis });
+      
+      console.log('✅ Analysis complete:', {
+        searchQueries: analysis.searchQueries.length,
+        thoughts: analysis.thoughts.length,
+        sources: analysis.sources.length,
+        reasoning: analysis.reasoning.length
+      });
+      
+      if (analysis.searchQueries.length > 0 || analysis.thoughts.length > 0 || 
+          analysis.sources.length > 0 || analysis.reasoning.length > 0) {
+        showNotification(`🎉 Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
+        displayAnalysisData();
+      } else {
+        showNotification('⚠️ No analysis data found in conversation');
+        displayAnalysisData();
+      }
+    } else {
+      console.log('❌ No conversation data found in storage');
+      showNotification('❌ No conversation data found - try refreshing the page');
+      
+      // Show debug information
+      console.log('🔧 Available storage keys:', Object.keys(allData));
+      displayAnalysisData();
+    }
+  } catch (error) {
+    console.error('❌ Error in force analyze:', error);
+    showNotification('❌ Force analyze failed: ' + error.message);
+  }
+}
+
 function toggleOverlay() {
   if (!overlay) return;
   
@@ -742,18 +876,52 @@ window.debugChatGPTAnalyst = function() {
   console.log('🔍 ChatGPT Analyst Debug Information:');
   console.log('Overlay exists:', !!overlay);
   console.log('Overlay visible:', overlayVisible);
+  console.log('Current URL:', window.location.href);
   
   chrome.storage.local.get(null, (items) => {
-    console.log('Local storage items:', Object.keys(items));
-    console.log('Conversation data exists:', !!items.conversationData);
-    console.log('Analysis data exists:', !!items.analysisData);
+    console.log('📦 All storage keys:', Object.keys(items));
+    console.log('📊 Conversation data exists:', !!items.conversationData);
+    console.log('🔍 Analysis data exists:', !!items.analysisData);
+    console.log('📋 Conversation metadata exists:', !!items.conversationMetadata);
+    
+    if (items.conversationData) {
+      console.log('📊 Conversation data info:', {
+        hasMapping: !!items.conversationData.mapping,
+        mappingKeys: items.conversationData.mapping ? Object.keys(items.conversationData.mapping).length : 0,
+        title: items.conversationData.title || 'No title',
+        conversationId: items.conversationData.conversation_id
+      });
+    }
     
     if (items.analysisData) {
-      console.log('Analysis data summary:', {
+      console.log('🔍 Analysis data summary:', {
         searchQueries: items.analysisData.searchQueries?.length || 0,
         thoughts: items.analysisData.thoughts?.length || 0,
         sources: items.analysisData.sources?.length || 0,
-        reasoning: items.analysisData.reasoning?.length || 0
+        reasoning: items.analysisData.reasoning?.length || 0,
+        userContext: Object.keys(items.analysisData.userContext || {}).length
+      });
+    }
+    
+    if (items.conversationMetadata) {
+      console.log('📋 Conversation metadata:', items.conversationMetadata);
+    }
+    
+    // List all ChatGPT Analyst related keys
+    const analystKeys = Object.keys(items).filter(key => 
+      key.includes('chatgpt') || key.includes('conversation') || key.includes('analysis')
+    );
+    console.log('🔧 ChatGPT Analyst storage keys:', analystKeys);
+    
+    // Force refresh analysis
+    console.log('🔄 Forcing analysis refresh...');
+    if (items.conversationData) {
+      const analysis = extractSearchAndReasoning(items.conversationData);
+      console.log('🎯 Fresh analysis result:', {
+        searchQueries: analysis.searchQueries?.length || 0,
+        thoughts: analysis.thoughts?.length || 0,
+        sources: analysis.sources?.length || 0,
+        reasoning: analysis.reasoning?.length || 0
       });
     }
   });
