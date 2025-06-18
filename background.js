@@ -144,6 +144,17 @@ function setupNetworkInterception(tabId, conversationId) {
                chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
                  if (chrome.runtime.lastError) {
                    console.warn('[ChatGPT Analyst] Error getting response body:', chrome.runtime.lastError.message);
+                   
+                   // Fallback: Signal that we detected a conversation but couldn't read the body
+                   console.log('[ChatGPT Analyst] 🔄 Fallback: Detected conversation, user needs to refresh or manually trigger');
+                   chrome.storage.local.set({
+                     'conversationDetected': {
+                       timestamp: new Date().toISOString(),
+                       conversationId: conversationId,
+                       url: url,
+                       needsRefresh: true
+                     }
+                   });
                    return;
                  }
                  

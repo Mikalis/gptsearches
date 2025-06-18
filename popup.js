@@ -1,9 +1,10 @@
 // ChatGPT Analyst - Popup with Manual Analysis
-console.log('🎉 ChatGPT Analyst popup loading...');
+console.log('🎉 ChatGPT Analyst popup loading...');bug
 
 document.addEventListener('DOMContentLoaded', () => {
   // DOM elements
   const analyzeBtn = document.getElementById('analyze-btn');
+  const extractBtn = document.getElementById('extract-btn');
   const newConversationBtn = document.getElementById('new-conversation-btn');
   const tipsHeader = document.getElementById('tips-header');
   const tipsContent = document.getElementById('tips-content');
@@ -100,6 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Action buttons
     analyzeBtn.addEventListener('click', handleAnalyzeClick);
+    extractBtn.addEventListener('click', handleExtractClick);
     newConversationBtn.addEventListener('click', handleNewConversationClick);
   }
   
@@ -138,11 +140,55 @@ document.addEventListener('DOMContentLoaded', () => {
       analyzeBtn.innerHTML = '<span class="section-icon">⏳</span>Analyzing...';
       
       // Get conversation data from storage
-      const result = await chrome.storage.local.get(['conversationData']);
+      const result = await chrome.storage.local.get(['conversationData', 'conversationDetected']);
       
       if (!result.conversationData) {
-        showNotification('No conversation data found. Try refreshing the ChatGPT page.', 'error');
-        updateStatus('error', 'No conversation data found');
+        // Check if we detected a conversation but couldn't read the data
+        if (result.conversationDetected && result.conversationDetected.needsRefresh) {
+          showNotification('Conversation detected but data not accessible. Try refreshing the ChatGPT page first.', 'error');
+          updateStatus('error', 'Refresh ChatGPT page needed');
+          
+          // Show refresh suggestion
+          document.getElementById('new-conversation-btn').innerHTML = '<span class="section-icon">🔄</span>Refresh ChatGPT Page';
+          document.getElementById('new-conversation-btn').onclick = () => {
+            chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+              chrome.tabs.reload(tabs[0].id);
+              window.close();
+            });
+          };
+        } else {
+          // Try fallback: extract data directly from page
+          console.log('🔄 Trying fallback page extraction...');
+          updateStatus('analyzing', 'Trying to extract from page...');
+          
+          try {
+            const response = await chrome.tabs.sendMessage(currentTab.id, {
+              action: 'extractPageData'
+            });
+            
+            if (response && response.success && response.hasData) {
+              showNotification('Successfully extracted data from page!');
+              // Retry analysis with newly extracted data
+              setTimeout(() => {
+                handleAnalyzeClick();
+              }, 500);
+              return;
+                         } else {
+               showNotification('No conversation data found. Make sure you are on a ChatGPT conversation page and try refreshing.', 'error');
+               updateStatus('error', 'No conversation data found');
+               
+               // Show extract button as alternative
+               extractBtn.style.display = 'block';
+             }
+           } catch (extractError) {
+             console.error('❌ Page extraction failed:', extractError);
+             showNotification('Could not extract data from page. Try refreshing the ChatGPT page.', 'error');
+             updateStatus('error', 'Page extraction failed');
+             
+             // Show extract button as alternative
+             extractBtn.style.display = 'block';
+           }
+        }
         resetAnalyzeButton();
         return;
       }
@@ -167,6 +213,9 @@ document.addEventListener('DOMContentLoaded', () => {
       updateStatus('success', `Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
       showNotification(`Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
       
+      // Hide extract button on successful analysis
+      extractBtn.style.display = 'none';
+      
       resetAnalyzeButton();
       
     } catch (error) {
@@ -180,6 +229,41 @@ document.addEventListener('DOMContentLoaded', () => {
   function resetAnalyzeButton() {
     analyzeBtn.disabled = false;
     analyzeBtn.innerHTML = '<span class="section-icon">🔍</span>Analyze Conversation';
+  }
+  
+  async function handleExtractClick() {
+    if (!currentTab) return;
+    
+    try {
+      updateStatus('analyzing', 'Extracting data from page...');
+      extractBtn.disabled = true;
+      extractBtn.innerHTML = '<span class="section-icon">⏳</span>Extracting...';
+      
+      const response = await chrome.tabs.sendMessage(currentTab.id, {
+        action: 'extractPageData'
+      });
+      
+      if (response && response.success && response.hasData) {
+        showNotification('Successfully extracted data from page!');
+        updateStatus('success', 'Data extracted from page');
+        
+        // Hide extract button and retry analysis
+        extractBtn.style.display = 'none';
+        setTimeout(() => {
+          handleAnalyzeClick();
+        }, 500);
+      } else {
+        showNotification('No conversation data found on page. Try refreshing the ChatGPT page.', 'error');
+        updateStatus('error', 'No data found on page');
+      }
+    } catch (error) {
+      console.error('❌ Extract error:', error);
+      showNotification('Failed to extract data from page: ' + error.message, 'error');
+      updateStatus('error', 'Extraction failed');
+    } finally {
+      extractBtn.disabled = false;
+      extractBtn.innerHTML = '<span class="section-icon">📄</span>Try Page Extraction';
+    }
   }
   
   function handleNewConversationClick() {

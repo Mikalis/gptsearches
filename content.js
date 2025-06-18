@@ -7,6 +7,122 @@ console.log('🔍 ChatGPT Analyst content script loaded - popup-controlled mode'
 
 console.log('✅ Content script ready - use popup to analyze conversations');
 
+// Listen for messages from popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'extractPageData') {
+    console.log('🔍 Popup requested page data extraction');
+    
+    try {
+      // Try to extract conversation data from page
+      const conversationData = extractConversationFromPage();
+      
+      if (conversationData) {
+        // Save to storage for popup to access
+        chrome.storage.local.set({ 
+          conversationData: conversationData,
+          conversationMetadata: {
+            timestamp: new Date().toISOString(),
+            source: 'page_extraction',
+            conversationId: conversationData.conversation_id || 'unknown',
+            title: conversationData.title || 'Page Extracted Conversation'
+          }
+        });
+        
+        sendResponse({ 
+          success: true, 
+          message: 'Data extracted from page',
+          hasData: true,
+          conversationId: conversationData.conversation_id
+        });
+      } else {
+        sendResponse({ 
+          success: false, 
+          message: 'No conversation data found on page',
+          hasData: false
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error extracting page data:', error);
+      sendResponse({ 
+        success: false, 
+        message: 'Error extracting data: ' + error.message,
+        hasData: false
+      });
+    }
+    
+    return true; // Keep message channel open for async response
+  }
+});
+
+// Function to extract conversation data directly from the page
+function extractConversationFromPage() {
+  console.log('🔍 Attempting to extract conversation data from page...');
+  
+  // Method 1: Try to find conversation data in window.__NEXT_DATA__
+  if (window.__NEXT_DATA__ && window.__NEXT_DATA__.props) {
+    const pageProps = window.__NEXT_DATA__.props.pageProps;
+    if (pageProps && pageProps.serverResponse && pageProps.serverResponse.data) {
+      console.log('✅ Found conversation data in __NEXT_DATA__');
+      return pageProps.serverResponse.data;
+    }
+  }
+  
+  // Method 2: Try to find conversation data in other common locations
+  const scripts = document.querySelectorAll('script');
+  for (const script of scripts) {
+    if (script.textContent && script.textContent.includes('"conversation_id"')) {
+      try {
+        // Try to extract JSON from script content
+        const jsonMatch = script.textContent.match(/\{.*"conversation_id".*\}/s);
+        if (jsonMatch) {
+          const data = JSON.parse(jsonMatch[0]);
+          if (data.mapping && data.conversation_id) {
+            console.log('✅ Found conversation data in script tag');
+            return data;
+          }
+        }
+      } catch (e) {
+        // Continue searching
+      }
+    }
+  }
+  
+  // Method 3: Try to get conversation ID from URL and build minimal structure
+  const url = window.location.href;
+  const conversationId = extractConversationIdFromUrl(url);
+  
+  if (conversationId) {
+    console.log('⚠️ Only found conversation ID from URL, creating minimal structure');
+    return {
+      conversation_id: conversationId,
+      title: document.title || 'ChatGPT Conversation',
+      mapping: {},
+      create_time: Date.now() / 1000,
+      update_time: Date.now() / 1000
+    };
+  }
+  
+  console.log('❌ No conversation data found on page');
+  return null;
+}
+
+function extractConversationIdFromUrl(url) {
+  const patterns = [
+    /chatgpt\.com\/c\/([a-zA-Z0-9-]+)/,
+    /chatgpt\.com\/conversation\/([a-zA-Z0-9-]+)/,
+    /chatgpt\.com\/chat\/([a-zA-Z0-9-]+)/,
+    /chat\.openai\.com\/c\/([a-zA-Z0-9-]+)/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
 // Optional: Add keyboard shortcut for quick popup access
 document.addEventListener('keydown', (e) => {
   // Ctrl+Shift+A (or Cmd+Shift+A on Mac) to remind user to use popup
