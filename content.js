@@ -426,29 +426,54 @@ function showNotification(message, type = 'success') {
 
 // Listen for intercepted conversation data from main world
 window.addEventListener('message', (event) => {
-  if (event.source === window && event.data.type === 'CHATGPT_CONVERSATION_DATA') {
-    console.log('[ChatGPT Analyst] Received intercepted conversation data:', event.data.url);
-    
-    try {
-      const conversationData = event.data.data;
-      console.log('[ChatGPT Analyst] Processing intercepted conversation data...');
+  if (event.source === window) {
+    if (event.data.type === 'CHATGPT_CONVERSATION_DATA') {
+      console.log('[ChatGPT Analyst] Received intercepted conversation data:', event.data.url);
       
-      // Use existing analysis function to process the data
-      const analysisData = extractSearchAndReasoning(conversationData);
-      
-      if (analysisData.hasData) {
-        console.log('[ChatGPT Analyst] Found analysis data in intercepted response:', {
-          searchQueries: analysisData.searchQueries.length,
-          thoughts: analysisData.thoughts.length,
-          reasoning: analysisData.reasoning.length
+      try {
+        const conversationData = event.data.data;
+        console.log('[ChatGPT Analyst] Processing intercepted conversation data...');
+        
+        // Use existing analysis function to process the data
+        const analysisData = extractSearchAndReasoning(conversationData);
+        
+        if (analysisData.hasData) {
+          console.log('[ChatGPT Analyst] Found analysis data in intercepted response:', {
+            searchQueries: analysisData.searchQueries.length,
+            thoughts: analysisData.thoughts.length,
+            reasoning: analysisData.reasoning.length
+          });
+          showAnalysisResult(analysisData);
+        } else {
+          console.log('[ChatGPT Analyst] No analysis data found in intercepted response');
+          showAnalysisResult({
+            hasData: false,
+            searchQueries: [],
+            thoughts: [],
+            reasoning: [],
+            error: 'No search queries or internal reasoning found in this conversation'
+          });
+        }
+        
+      } catch (error) {
+        console.error('[ChatGPT Analyst] Error processing intercepted data:', error);
+        showAnalysisResult({
+          hasData: false,
+          searchQueries: [],
+          thoughts: [],
+          reasoning: [],
+          error: `Error processing conversation data: ${error.message}`
         });
-        showAnalysisResult(analysisData);
-      } else {
-        console.log('[ChatGPT Analyst] No analysis data found in intercepted response');
       }
-      
-    } catch (error) {
-      console.error('[ChatGPT Analyst] Error processing intercepted data:', error);
+    } else if (event.data.type === 'CHATGPT_CONVERSATION_ERROR') {
+      console.error('[ChatGPT Analyst] Received conversation error:', event.data.error);
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        error: `Failed to fetch conversation data: ${event.data.error}`
+      });
     }
   }
 });
