@@ -1,5 +1,5 @@
 // ChatGPT Analyst - Popup with Manual Analysis
-console.log('🎉 ChatGPT Analyst popup loading...');bug
+console.log('🎉 ChatGPT Analyst popup loading...');
 
 document.addEventListener('DOMContentLoaded', () => {
   // DOM elements
