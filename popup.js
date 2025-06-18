@@ -18,9 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusIndicator = document.getElementById('status-indicator');
   const statusText = statusIndicator.querySelector('.status-text');
   const statusDot = statusIndicator.querySelector('.status-dot');
-  const statsGrid = document.getElementById('stats-grid');
-  const queriesCount = document.getElementById('queries-count');
-  const thoughtsCount = document.getElementById('thoughts-count');
   
   // Settings elements
   const showDebugToggle = document.getElementById('show-debug');
@@ -211,7 +208,6 @@ document.addEventListener('DOMContentLoaded', () => {
       await chrome.storage.local.set({ analysisData: analysis });
       
       displayResults(analysis);
-      updateStats(analysis);
       updateStatus('success', `Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
       showNotification(`Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
       
@@ -296,10 +292,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Remove all identified keys
         await chrome.storage.local.remove(keysToRemove);
         
-        // Clear UI
-        currentAnalysis = null;
-        updateStats(null);
-        resultsSection.style.display = 'none';
+                 // Clear UI
+         currentAnalysis = null;
+         resultsSection.style.display = 'none';
         
         showNotification(`Cleared ${keysToRemove.length} data items successfully!`);
         updateStatus('ready', 'All old data cleared - ready for new analysis');
@@ -609,24 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return div.innerHTML;
   }
   
-  function updateStats(data) {
-    if (!data) {
-      statsGrid.style.display = 'none';
-      return;
-    }
-    
-    const queries = data.searchQueries?.length || 0;
-    const thoughts = data.thoughts?.length || 0;
-    
-    queriesCount.textContent = queries;
-    thoughtsCount.textContent = thoughts;
-    
-    if (queries > 0 || thoughts > 0) {
-      statsGrid.style.display = 'grid';
-    } else {
-      statsGrid.style.display = 'none';
-    }
-  }
+  // updateStats function removed - status text shows counts instead
   
   function updateStatus(type, message) {
     statusText.textContent = message;
