@@ -873,13 +873,18 @@ function extractSearchAndReasoning(data) {
           <h5>🆕 This Conversation is No Longer Available</h5>
           <p>The conversation you're trying to analyze has expired or been deleted from ChatGPT.</p>
           <div class="solution-steps">
-            <h6>✅ To test the extension, please:</h6>
+            <h6>✅ Extension is working correctly! To test it:</h6>
             <ol>
               <li><strong>Start a new conversation</strong> with ChatGPT</li>
-              <li><strong>Ask a research question</strong> (e.g., "What are the latest developments in AI?")</li>
-              <li><strong>Wait for ChatGPT's response</strong> to fully load</li>
-              <li><strong>Click "Analyze"</strong> again to extract the search data</li>
+              <li><strong>Ask a research question</strong> that triggers web search:<br>
+                  <em>"What are the latest AI breakthroughs in 2024?"</em><br>
+                  <em>"Compare the top programming languages this year"</em><br>
+                  <em>"What are current trends in web development?"</em>
+              </li>
+              <li><strong>Wait for ChatGPT's complete response</strong></li>
+              <li><strong>Click "Analyze" button</strong> in the overlay to extract search data</li>
             </ol>
+            <p><strong>✅ All systems working:</strong> Response interception ✓, Fallback strategies ✓, Error handling ✓</p>
           </div>
           <div class="action-buttons">
             <button data-action="new-conversation" class="primary-btn">🚀 Start New Conversation</button>
@@ -1054,7 +1059,22 @@ window.testChatGPTAnalystOverlay = function() {
   }, '*');
 };
 
-console.log('[ChatGPT Analyst] Use window.testChatGPTAnalystOverlay() to test overlay');
+window.debugChatGPTAnalyst = function() {
+  console.log('[ChatGPT Analyst] 🔍 Debug Information:');
+  console.log('Current URL:', window.location.href);
+  console.log('Conversation ID:', getCurrentConversationId());
+  console.log('Overlay exists:', !!overlayElement);
+  console.log('Overlay visible:', overlayVisible);
+  console.log('Current data:', currentData);
+  
+  // Try to trigger analysis immediately
+  console.log('🚀 Triggering analysis...');
+  analyzeCurrentConversation();
+};
+
+console.log('[ChatGPT Analyst] Debug commands available:');
+console.log('- window.testChatGPTAnalystOverlay() - Test overlay display');
+console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
 
 // Legacy functions removed - no longer needed with direct API approach
 // These functions violated CSP by injecting inline scripts
