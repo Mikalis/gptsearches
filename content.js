@@ -187,6 +187,35 @@ function updateOverlayContent(data) {
   contentDiv.innerHTML = '';
   statusDiv.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
   
+  if (data.showWelcome) {
+    contentDiv.innerHTML = `
+      <div class="welcome-message">
+        <h4>🔍 ChatGPT Search Query Analyzer</h4>
+        <p>✅ <strong>Plugin is working!</strong> Ready to analyze ChatGPT conversations.</p>
+        <div class="user-guidance">
+          <p><strong>How to use:</strong></p>
+          <ol>
+            <li>Click <strong>"Analyze Conversation"</strong> button above or in the popup</li>
+            <li>The plugin will extract search queries and internal reasoning</li>
+            <li>Results will appear here in this overlay</li>
+          </ol>
+        </div>
+        <div class="solution-steps">
+          <h6>💡 For best results:</h6>
+          <ul>
+            <li>Ask ChatGPT questions that require web research</li>
+            <li>Wait for ChatGPT to finish its complete response</li>
+            <li>Then click "Analyze" to see what searches were made</li>
+          </ul>
+        </div>
+        <div class="action-buttons">
+          <button data-action="analyze" class="primary-btn">🔍 Analyze This Conversation</button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  
   if (data.error) {
     contentDiv.innerHTML = `
       <div class="error-message">
@@ -466,7 +495,11 @@ function showOverlayElement() {
   const overlay = document.getElementById(CONFIG.overlayId);
   if (overlay) {
     overlay.style.display = 'block';
+    overlay.classList.add('visible');
     overlayVisible = true;
+    console.log('[ChatGPT Analyst] Overlay made visible');
+  } else {
+    console.log('[ChatGPT Analyst] Could not find overlay element to show');
   }
 }
 
@@ -474,13 +507,21 @@ function showOverlayElement() {
 function hideOverlay() {
   const overlay = document.getElementById(CONFIG.overlayId);
   if (overlay) {
-    overlay.style.display = 'none';
+    overlay.classList.remove('visible'); // Remove the visible class
     overlayVisible = false;
+    // Use setTimeout to allow the CSS transition to complete before hiding
+    setTimeout(() => {
+      overlay.style.display = 'none';
+    }, 300); // Match the CSS transition duration
+    console.log('[ChatGPT Analyst] Overlay hidden');
   }
 }
 
 // Toggle overlay visibility
 function toggleOverlay() {
+  const overlay = document.getElementById(CONFIG.overlayId);
+  if (!overlay) return;
+  
   if (overlayVisible) {
     hideOverlay();
   } else {
@@ -1084,26 +1125,42 @@ function initializeExtension() {
     debugAnalysis();
   };
   
-  // Create overlay if it doesn't exist
-  if (!document.getElementById(CONFIG.overlayId)) {
+  window.showChatGPTAnalystOverlay = () => {
+    console.log('[ChatGPT Analyst] Forcing overlay to show...');
     createOverlay();
-  }
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      showWelcome: true
+    });
+  };
   
-  // Try to load previous analysis data from localStorage
-  const savedData = loadAnalysisFromLocalStorage();
-  if (savedData) {
-    console.log('[ChatGPT Analyst] Restored previous analysis data from localStorage');
-    dataReceived = true;
-    currentData = savedData;
-    showAnalysisResult(savedData);
-  }
+  // Create overlay immediately
+  createOverlay();
   
-  // Set up mutation observer to ensure overlay persists
+  // Show a welcome message to test if overlay is working
+  setTimeout(() => {
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      isLoading: false,
+      showWelcome: true
+    });
+  }, 1000);
+  
+  // Set up overlay persistence
   setupOverlayPersistence();
   
-  console.log('[ChatGPT Analyst] Debug commands available:');
-  console.log('- window.testChatGPTAnalystOverlay() - Test overlay display');
-  console.log('- window.debugChatGPTAnalyst() - Full debug and analysis');
+  // Try to load existing analysis data
+  const existingData = loadAnalysisFromLocalStorage();
+  if (existingData && existingData.hasData) {
+    console.log('[ChatGPT Analyst] Found existing analysis data, displaying...');
+    showAnalysisResult(existingData);
+  }
   
   console.log('[ChatGPT Analyst] Extension initialized successfully');
 }
