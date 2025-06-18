@@ -149,26 +149,27 @@ function extractRelevantData(data) {
   return relevantNodes;
 }
 
-// Create search queries section
-function createSearchQueriesSection(node) {
+// Create search queries display section
+function createSearchQueriesDisplaySection(searchQueries) {
   const container = document.createElement('div');
   container.className = 'search-queries-section';
   
   const title = document.createElement('h4');
-  title.textContent = '🔍 Search Queries Triggered:';
+  title.textContent = `🔍 Search Queries Detected (${searchQueries.length}):`;
   title.className = 'section-title search-title';
   container.appendChild(title);
   
   const queriesList = document.createElement('ul');
   queriesList.className = 'queries-list';
   
-  node.message.metadata.search_queries.forEach((query, index) => {
+  searchQueries.forEach((queryData, index) => {
     const listItem = document.createElement('li');
     listItem.className = 'query-item';
     listItem.innerHTML = `
       <span class="query-number">${index + 1}.</span>
-      <span class="query-text">${escapeHtml(query.q || query)}</span>
-      <button class="copy-btn" onclick="copyToClipboard('${escapeHtml(query.q || query)}')" title="Copy query">📋</button>
+      <span class="query-text">${escapeHtml(queryData.query)}</span>
+      <button class="copy-btn" onclick="copyToClipboard('${escapeHtml(queryData.query)}')" title="Copy query">📋</button>
+      ${queryData.timestamp ? `<span class="query-time">${new Date(queryData.timestamp).toLocaleTimeString()}</span>` : ''}
     `;
     queriesList.appendChild(listItem);
   });
@@ -177,17 +178,17 @@ function createSearchQueriesSection(node) {
   return container;
 }
 
-// Create thoughts section
-function createThoughtsSection(node) {
+// Create thoughts display section
+function createThoughtsDisplaySection(thoughts) {
   const container = document.createElement('div');
   container.className = 'thoughts-section';
   
   const title = document.createElement('h4');
-  title.textContent = '💭 Internal Thoughts:';
+  title.textContent = `💭 Internal Thoughts (${thoughts.length}):`;
   title.className = 'section-title thoughts-title';
   container.appendChild(title);
   
-  node.message.content.thoughts.forEach((thought, index) => {
+  thoughts.forEach((thought, index) => {
     const thoughtDiv = document.createElement('div');
     thoughtDiv.className = 'thought-item';
     
@@ -205,21 +206,90 @@ function createThoughtsSection(node) {
       thoughtDiv.appendChild(content);
     }
     
+    if (thought.timestamp) {
+      const timestamp = document.createElement('div');
+      timestamp.className = 'thought-timestamp';
+      timestamp.innerHTML = `<small>Time: ${new Date(thought.timestamp).toLocaleString()}</small>`;
+      thoughtDiv.appendChild(timestamp);
+    }
+    
     container.appendChild(thoughtDiv);
   });
   
   return container;
 }
 
+// Create reasoning display section
+function createReasoningDisplaySection(reasoning) {
+  const container = document.createElement('div');
+  container.className = 'reasoning-section';
+  
+  const title = document.createElement('h4');
+  title.textContent = `🧠 Reasoning Patterns (${reasoning.length}):`;
+  title.className = 'section-title reasoning-title';
+  container.appendChild(title);
+  
+  reasoning.forEach((reasoningData, index) => {
+    const reasoningDiv = document.createElement('div');
+    reasoningDiv.className = 'reasoning-item';
+    
+    const content = document.createElement('div');
+    content.className = 'reasoning-content';
+    content.innerHTML = `<strong>${reasoningData.type}:</strong> ${escapeHtml(reasoningData.text)}`;
+    reasoningDiv.appendChild(content);
+    
+    if (reasoningData.timestamp) {
+      const timestamp = document.createElement('div');
+      timestamp.className = 'reasoning-timestamp';
+      timestamp.innerHTML = `<small>Time: ${new Date(reasoningData.timestamp).toLocaleString()}</small>`;
+      reasoningDiv.appendChild(timestamp);
+    }
+    
+    container.appendChild(reasoningDiv);
+  });
+  
+  return container;
+}
+
+// Create metadata section
+function createMetadataSection(metadata) {
+  const container = document.createElement('div');
+  container.className = 'metadata-section';
+  
+  const title = document.createElement('h4');
+  title.textContent = '📊 Conversation Info:';
+  title.className = 'section-title metadata-title';
+  container.appendChild(title);
+  
+  const metadataDiv = document.createElement('div');
+  metadataDiv.className = 'metadata-content';
+  metadataDiv.innerHTML = `
+    <div class="metadata-item">
+      <strong>Title:</strong> ${escapeHtml(metadata.conversationTitle)}
+    </div>
+    <div class="metadata-item">
+      <strong>Total Messages:</strong> ${metadata.totalMessages}
+    </div>
+    ${metadata.lastUpdate ? `
+      <div class="metadata-item">
+        <strong>Last Update:</strong> ${new Date(metadata.lastUpdate).toLocaleString()}
+      </div>
+    ` : ''}
+  `;
+  
+  container.appendChild(metadataDiv);
+  return container;
+}
+
 // Add export functionality
-function addExportButton(contentDiv, relevantNodes) {
+function addExportButton(contentDiv, analysisData) {
   const exportDiv = document.createElement('div');
   exportDiv.className = 'export-section';
   
   const exportBtn = document.createElement('button');
   exportBtn.className = 'export-btn';
   exportBtn.textContent = '📊 Export Data';
-  exportBtn.onclick = () => exportData(relevantNodes);
+  exportBtn.onclick = () => exportAnalysisData(analysisData);
   
   exportDiv.appendChild(exportBtn);
   contentDiv.appendChild(exportDiv);
@@ -250,29 +320,30 @@ function addPromotionalContent(contentDiv) {
   contentDiv.appendChild(promoDiv);
 }
 
-// Export data functionality
-function exportData(relevantNodes) {
+// Export analysis data functionality
+function exportAnalysisData(analysisData) {
   const exportData = {
     timestamp: new Date().toISOString(),
     url: window.location.href,
+    conversationId: getCurrentConversationId(),
     data: {
-      search_queries: [],
-      thoughts: []
+      searchQueries: analysisData.searchQueries || [],
+      thoughts: analysisData.thoughts || [],
+      reasoning: analysisData.reasoning || [],
+      metadata: analysisData.metadata || {}
+    },
+    summary: {
+      totalSearchQueries: (analysisData.searchQueries || []).length,
+      totalThoughts: (analysisData.thoughts || []).length,
+      totalReasoningPatterns: (analysisData.reasoning || []).length,
+      hasData: analysisData.hasData
     }
   };
-  
-  relevantNodes.forEach(item => {
-    if (item.type === 'search_queries') {
-      exportData.data.search_queries.push(...item.node.message.metadata.search_queries);
-    } else if (item.type === 'thoughts') {
-      exportData.data.thoughts.push(...item.node.message.content.thoughts);
-    }
-  });
   
   // Copy to clipboard
   navigator.clipboard.writeText(JSON.stringify(exportData, null, 2))
     .then(() => {
-      showNotification('Data exported to clipboard!');
+      showNotification('Analysis data exported to clipboard!');
     })
     .catch(err => {
       console.error('Failed to copy data:', err);
@@ -342,7 +413,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   switch (request.action) {
     case 'requestCompleted':
-      handleRequestCompleted(request);
+      // Trigger analysis when we detect ChatGPT activity
+      analyzeCurrentConversation();
+      sendResponse({ status: 'success', timestamp: Date.now() });
+      break;
+      
+    case 'analyzeConversation':
+      // Manual analysis trigger
+      analyzeCurrentConversation();
       sendResponse({ status: 'success', timestamp: Date.now() });
       break;
       
@@ -355,7 +433,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ 
         status: 'success', 
         visible: overlayVisible,
-        hasData: currentData !== null 
+        hasData: currentData !== null,
+        conversationId: getCurrentConversationId()
       });
       break;
       
@@ -373,6 +452,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const contentDiv = document.getElementById(CONFIG.contentId);
         if (contentDiv) {
           contentDiv.innerHTML = '<p class="no-data">Analysis data cleared.</p>';
+          addPromotionalContent(contentDiv);
         }
       }
       sendResponse({ status: 'success' });
@@ -386,142 +466,333 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
-// Handle request completed notification (legacy - analysis now happens via GET request interception)
-async function handleRequestCompleted(request) {
-  console.log('[ChatGPT Analyst] Request completed:', request.url);
-  
-  // The actual analysis now happens automatically when GET requests are intercepted
-  // This function just logs the completion for debugging purposes
-  
-  // If we haven't seen any conversation data yet, show a waiting message
-  if (!currentData) {
-    console.log('[ChatGPT Analyst] Waiting for conversation data to be loaded...');
-    
-    // Create overlay to show we're monitoring
-    if (!overlayElement) {
-      createOverlay();
-    }
-    
-    const contentDiv = document.getElementById(CONFIG.contentId);
-    if (contentDiv && !contentDiv.querySelector('.waiting-message')) {
-      contentDiv.innerHTML = `
-        <div class="waiting-message">
-          <h4>🔍 Monitoring ChatGPT...</h4>
-          <p>Ask a question to ChatGPT to see search queries and thoughts!</p>
-          <p><small>The extension will automatically analyze responses when available.</small></p>
-        </div>
-      `;
-      // Add promotional content
-      addPromotionalContent(contentDiv);
-    }
-    
-    if (CONFIG.autoShow) {
-      showOverlay();
-    }
+// Global function for retry button
+window.chatgptAnalyzeConversation = function() {
+  analyzeCurrentConversation();
+};
+
+// Keyboard shortcut handler
+document.addEventListener('keydown', (event) => {
+  // Ctrl+Shift+S to toggle overlay
+  if (event.ctrlKey && event.shiftKey && event.key === 'S') {
+    event.preventDefault();
+    toggleOverlay();
   }
-}
-
-// Store intercepted response data
-let interceptedResponses = new Map();
-
-// Listen for intercepted responses from the injected script
-window.addEventListener('message', (event) => {
-  if (event.source === window && event.data.type === 'CHATGPT_RESPONSE_INTERCEPTED') {
-    console.log('[ChatGPT Analyst] Received intercepted response:', event.data.url);
-    
-    try {
-      // Parse the response data
-      const responseText = event.data.data;
-      let parsedData = null;
-      
-      // Handle GET requests to conversation endpoints (full conversation data)
-      if (event.data.method === 'GET' && responseText.trim()) {
-        parsedData = JSON.parse(responseText);
-        console.log('[ChatGPT Analyst] Parsed conversation data:', parsedData);
-        
-        // Store the conversation data and trigger analysis
-        if (parsedData && parsedData.mapping) {
-          interceptedResponses.set(event.data.url, parsedData);
-          console.log('[ChatGPT Analyst] Stored conversation data for:', event.data.url);
-          
-          // Trigger immediate analysis since this is the full conversation data
-          setTimeout(() => {
-            handleConversationData(parsedData, event.data.url);
-          }, 500);
-        }
-      } else {
-        // Handle streaming responses (multiple JSON objects) from POST requests
-        if (responseText.includes('\n')) {
-          const lines = responseText.split('\n').filter(line => line.trim());
-          const lastLine = lines[lines.length - 1];
-          if (lastLine.startsWith('data: ') && lastLine !== 'data: [DONE]') {
-            const jsonStr = lastLine.substring(6);
-            parsedData = JSON.parse(jsonStr);
-          }
-        } else if (responseText.trim()) {
-          parsedData = JSON.parse(responseText);
-        }
-        
-        if (parsedData) {
-          interceptedResponses.set(event.data.url, parsedData);
-          console.log('[ChatGPT Analyst] Stored intercepted response data for:', event.data.url);
-        }
-      }
-    } catch (error) {
-      console.warn('[ChatGPT Analyst] Error parsing intercepted response:', error);
-    }
+  
+  // Ctrl+Shift+A to trigger analysis
+  if (event.ctrlKey && event.shiftKey && event.key === 'A') {
+    event.preventDefault();
+    analyzeCurrentConversation();
   }
 });
 
-// Handle conversation data directly from GET requests
-function handleConversationData(data, url) {
+// Auto-trigger analysis when page content changes (new messages)
+let lastMessageCount = 0;
+function observeForNewMessages() {
+  const observer = new MutationObserver((mutations) => {
+    // Check if new message elements were added
+    const messageElements = document.querySelectorAll('[data-message-author-role]');
+    if (messageElements.length > lastMessageCount) {
+      lastMessageCount = messageElements.length;
+      // Wait a bit for the message to be fully rendered
+      setTimeout(() => {
+        console.log('[ChatGPT Analyst] New message detected, triggering analysis...');
+        analyzeCurrentConversation();
+      }, 2000);
+    }
+  });
+  
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
+// Extract conversation ID from current URL
+function getCurrentConversationId() {
+  const match = window.location.pathname.match(/\/c\/([a-f0-9-]{36})/);
+  return match ? match[1] : null;
+}
+
+// Fetch conversation data directly from API
+async function fetchConversationData(conversationId) {
   try {
-    console.log('[ChatGPT Analyst] Analyzing conversation data from:', url);
+    const apiUrl = `https://chatgpt.com/backend-api/conversation/${conversationId}`;
+    console.log('[ChatGPT Analyst] Fetching conversation data from:', apiUrl);
     
-    currentData = data;
+    const response = await fetch(apiUrl, {
+      credentials: 'include',
+      headers: {
+        'Accept': 'application/json',
+      }
+    });
     
-    // Create overlay if it doesn't exist
-    if (!overlayElement) {
-      createOverlay();
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
     
-    // Update content
-    updateOverlayContent(data);
-    
-    // Show overlay automatically if configured and there's relevant data
-    const relevantNodes = extractRelevantData(data);
-    if (CONFIG.autoShow && relevantNodes.length > 0) {
-      showOverlay();
-      console.log('[ChatGPT Analyst] Auto-showing overlay with', relevantNodes.length, 'relevant data points');
-    }
-    
-    console.log('[ChatGPT Analyst] Conversation analysis complete, found', relevantNodes.length, 'relevant data points');
+    const data = await response.json();
+    console.log('[ChatGPT Analyst] Successfully fetched conversation data');
+    return data;
     
   } catch (error) {
-    console.error('[ChatGPT Analyst] Error analyzing conversation data:', error);
+    console.error('[ChatGPT Analyst] Error fetching conversation data:', error);
+    throw error;
+  }
+}
+
+// Main function to analyze current conversation
+async function analyzeCurrentConversation() {
+  console.log('[ChatGPT Analyst] Starting conversation analysis...');
+  
+  const conversationId = getCurrentConversationId();
+  
+  if (!conversationId) {
+    console.log('[ChatGPT Analyst] No conversation ID found in URL');
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      error: 'Not in a ChatGPT conversation'
+    });
+    return;
+  }
+  
+  console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
+  
+  try {
+    // Show loading state
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      isLoading: true
+    });
     
-    if (!overlayElement) {
-      createOverlay();
+    // Fetch conversation data
+    const conversationData = await fetchConversationData(conversationId);
+    
+    // Extract search queries and reasoning from the conversation
+    const analysisData = extractSearchAndReasoning(conversationData);
+    
+    if (analysisData.hasData) {
+      console.log('[ChatGPT Analyst] Analysis found data:', analysisData);
+      showAnalysisResult(analysisData);
+    } else {
+      console.log('[ChatGPT Analyst] No search queries or reasoning found in conversation');
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        error: 'No search queries or internal reasoning found in this conversation'
+      });
     }
     
-    const contentDiv = document.getElementById(CONFIG.contentId);
-    if (contentDiv) {
-      contentDiv.innerHTML = `
-        <div class="error-message">
-          <h4>⚠️ Analysis Error</h4>
-          <p>Failed to analyze conversation data:</p>
-          <code>${escapeHtml(error.message)}</code>
-          <p><small>Conversation data was intercepted but could not be processed.</small></p>
-        </div>
-      `;
-      // Add promotional content even in error cases
-      addPromotionalContent(contentDiv);
+  } catch (error) {
+    console.error('[ChatGPT Analyst] Error analyzing conversation:', error);
+    showAnalysisResult({
+      hasData: false,
+      searchQueries: [],
+      thoughts: [],
+      reasoning: [],
+      error: `Failed to fetch conversation data: ${error.message}`
+    });
+  }
+}
+
+// Extract search queries and reasoning from conversation data
+function extractSearchAndReasoning(data) {
+  const result = {
+    hasData: false,
+    searchQueries: [],
+    thoughts: [],
+    reasoning: [],
+    metadata: {
+      conversationTitle: data.title || 'Untitled Conversation',
+      lastUpdate: data.update_time ? new Date(data.update_time * 1000).toISOString() : null,
+      totalMessages: 0
+    }
+  };
+  
+  if (!data || !data.mapping) {
+    return result;
+  }
+  
+  // Count total messages
+  result.metadata.totalMessages = Object.keys(data.mapping).filter(
+    nodeId => data.mapping[nodeId].message && data.mapping[nodeId].message.author
+  ).length;
+  
+  // Process each node in the conversation mapping
+  for (const nodeId in data.mapping) {
+    const node = data.mapping[nodeId];
+    
+    if (!node.message || !node.message.author) continue;
+    
+    const message = node.message;
+    
+    // Extract search queries from metadata
+    if (message.metadata && message.metadata.search_queries && message.metadata.search_queries.length > 0) {
+      message.metadata.search_queries.forEach(query => {
+        result.searchQueries.push({
+          query: typeof query === 'string' ? query : query.q || query.query || 'Unknown query',
+          timestamp: message.create_time ? new Date(message.create_time * 1000).toISOString() : null,
+          messageId: nodeId,
+          author: message.author.role
+        });
+      });
+      result.hasData = true;
     }
     
-    if (CONFIG.autoShow) {
-      showOverlay();
+    // Extract thoughts from content
+    if (message.content && message.content.content_type === 'thoughts' && message.content.thoughts) {
+      message.content.thoughts.forEach(thought => {
+        result.thoughts.push({
+          summary: thought.summary || null,
+          content: thought.content || thought.text || 'No content',
+          timestamp: message.create_time ? new Date(message.create_time * 1000).toISOString() : null,
+          messageId: nodeId,
+          author: message.author.role
+        });
+      });
+      result.hasData = true;
+    }
+    
+    // Extract reasoning from assistant messages (look for specific patterns)
+    if (message.author.role === 'assistant' && message.content && message.content.parts) {
+      message.content.parts.forEach(part => {
+        if (typeof part === 'string' && part.length > 0) {
+          // Look for reasoning patterns in the text
+          const reasoningIndicators = [
+            /I need to search for/i,
+            /Let me search for/i,
+            /I'll look up/i,
+            /Based on my search/i,
+            /From my research/i,
+            /I should find/i
+          ];
+          
+          reasoningIndicators.forEach(pattern => {
+            if (pattern.test(part)) {
+              result.reasoning.push({
+                text: part.substring(0, 500) + (part.length > 500 ? '...' : ''),
+                type: 'search_reasoning',
+                timestamp: message.create_time ? new Date(message.create_time * 1000).toISOString() : null,
+                messageId: nodeId,
+                author: message.author.role
+              });
+              result.hasData = true;
+            }
+          });
+        }
+      });
     }
   }
+  
+  return result;
+}
+
+// Show analysis results in overlay
+function showAnalysisResult(analysisData) {
+  // Create overlay if it doesn't exist
+  if (!overlayElement) {
+    createOverlay();
+  }
+  
+  const contentDiv = document.getElementById(CONFIG.contentId);
+  const statusDiv = overlayElement.querySelector('.overlay-status');
+  
+  if (!contentDiv) return;
+  
+  // Clear existing content
+  contentDiv.innerHTML = '';
+  
+  // Update status
+  if (analysisData.isLoading) {
+    statusDiv.textContent = 'Loading conversation data...';
+    contentDiv.innerHTML = `
+      <div class="loading-message">
+        <h4>🔄 Analyzing Conversation...</h4>
+        <p>Fetching conversation data from ChatGPT API...</p>
+      </div>
+    `;
+    addPromotionalContent(contentDiv);
+    showOverlay();
+    return;
+  } else if (analysisData.error) {
+    statusDiv.textContent = `Error: ${analysisData.error}`;
+    contentDiv.innerHTML = `
+      <div class="error-message">
+        <h4>⚠️ Analysis Error</h4>
+        <p>${escapeHtml(analysisData.error)}</p>
+        <button class="retry-btn" onclick="window.chatgptAnalyzeConversation()">🔄 Retry Analysis</button>
+      </div>
+    `;
+    addPromotionalContent(contentDiv);
+    showOverlay();
+    return;
+  } else {
+    statusDiv.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+  }
+  
+  // Show results
+  if (!analysisData.hasData) {
+    contentDiv.innerHTML = `
+      <div class="no-data">
+        <h4>🔍 No Analysis Data Found</h4>
+        <p>This conversation doesn't contain detectable search queries or internal reasoning.</p>
+        <p><small>Try asking ChatGPT a question that requires research or web searches.</small></p>
+      </div>
+    `;
+    addPromotionalContent(contentDiv);
+    showOverlay();
+    return;
+  }
+  
+  // Create sections for different types of data
+  if (analysisData.searchQueries.length > 0) {
+    const section = createSearchQueriesDisplaySection(analysisData.searchQueries);
+    contentDiv.appendChild(section);
+  }
+  
+  if (analysisData.thoughts.length > 0) {
+    const section = createThoughtsDisplaySection(analysisData.thoughts);
+    contentDiv.appendChild(section);
+  }
+  
+  if (analysisData.reasoning.length > 0) {
+    const section = createReasoningDisplaySection(analysisData.reasoning);
+    contentDiv.appendChild(section);
+  }
+  
+  // Add metadata section
+  if (analysisData.metadata) {
+    const metadataSection = createMetadataSection(analysisData.metadata);
+    contentDiv.appendChild(metadataSection);
+  }
+  
+  // Add export functionality
+  addExportButton(contentDiv, analysisData);
+  
+  // Add promotional content
+  addPromotionalContent(contentDiv);
+  
+  // Store current data
+  currentData = analysisData;
+  
+  // Show overlay automatically if configured
+  if (CONFIG.autoShow) {
+    showOverlay();
+  }
+  
+  console.log('[ChatGPT Analyst] Analysis complete:', {
+    searchQueries: analysisData.searchQueries.length,
+    thoughts: analysisData.thoughts.length,
+    reasoning: analysisData.reasoning.length
+  });
 }
 
 // Wait for intercepted response data (legacy for POST requests)
@@ -557,14 +828,44 @@ function waitForInterceptedResponse(url) {
   });
 }
 
-// Initialize when page is ready
-waitForPageReady().then(() => {
-  console.log('[ChatGPT Analyst] Content script loaded and ready');
+// Initialize the extension
+async function initializeChatGPTAnalyst() {
+  console.log('[ChatGPT Analyst] Initializing extension...');
   
-  // Create initial overlay (hidden)
+  // Wait for page to be ready
+  await waitForPageReady();
+  
+  // Start observing for new messages
+  observeForNewMessages();
+  
+  // Create overlay initially hidden
   createOverlay();
   hideOverlay();
-});
+  
+  // Show initial message
+  const contentDiv = document.getElementById(CONFIG.contentId);
+  if (contentDiv) {
+    contentDiv.innerHTML = `
+      <div class="init-message">
+        <h4>🔍 ChatGPT SEO Analyst Ready</h4>
+        <p>Extension is now monitoring this conversation.</p>
+        <p><strong>How to use:</strong></p>
+        <ul>
+          <li>Ask ChatGPT questions that require research</li>
+          <li>Press <kbd>Ctrl+Shift+A</kbd> to analyze current conversation</li>
+          <li>Press <kbd>Ctrl+Shift+S</kbd> to toggle this overlay</li>
+        </ul>
+        <button class="analyze-btn" onclick="window.chatgptAnalyzeConversation()">🔍 Analyze Now</button>
+      </div>
+    `;
+    addPromotionalContent(contentDiv);
+  }
+  
+  console.log('[ChatGPT Analyst] Extension initialized successfully');
+}
+
+// Initialize when page is ready
+initializeChatGPTAnalyst();
 
 // Try to get data from page JavaScript context
 async function tryGetDataFromPageContext(url) {

@@ -15,6 +15,7 @@ const elements = {
   overlayStatus: document.getElementById('overlay-status'),
   autoShowToggle: document.getElementById('auto-show-toggle'),
   monitorToggle: document.getElementById('monitor-toggle'),
+  analyzeBtn: document.getElementById('analyze-conversation'),
   toggleOverlayBtn: document.getElementById('toggle-overlay'),
   clearDataBtn: document.getElementById('clear-data')
 };
@@ -75,6 +76,29 @@ function setupEventListeners() {
   });
   
   // Action buttons
+  elements.analyzeBtn.addEventListener('click', async () => {
+    if (isChatGPTPage()) {
+      elements.analyzeBtn.textContent = '🔄 Analyzing...';
+      elements.analyzeBtn.disabled = true;
+      
+      try {
+        const response = await sendMessageToContentScript({ action: 'analyzeConversation' });
+        if (response && response.status === 'success') {
+          showTemporaryMessage('Analysis started! Check the overlay for results.');
+        } else {
+          showTemporaryMessage('Analysis failed. Make sure you\'re in a conversation.');
+        }
+      } catch (error) {
+        showTemporaryMessage('Analysis failed. Please try again.');
+      } finally {
+        elements.analyzeBtn.textContent = '🔍 Analyze Conversation';
+        elements.analyzeBtn.disabled = false;
+      }
+    } else {
+      showTemporaryMessage('Please navigate to ChatGPT first.');
+    }
+  });
+  
   elements.toggleOverlayBtn.addEventListener('click', () => {
     if (isChatGPTPage()) {
       sendMessageToContentScript({ action: 'toggleOverlay' });
@@ -105,6 +129,7 @@ async function updateStatus() {
       updateStatusElement(elements.pageStatus, isChatGPT ? 'ChatGPT' : 'Other Page', isChatGPT);
       
       // Update button states
+      elements.analyzeBtn.disabled = !isChatGPT;
       elements.toggleOverlayBtn.disabled = !isChatGPT;
       elements.clearDataBtn.disabled = !isChatGPT;
       

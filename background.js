@@ -23,14 +23,8 @@ chrome.webRequest.onBeforeRequest.addListener(
       requestId: details.requestId
     };
     
-    // Inject response interceptor into the page
-    chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      func: injectResponseInterceptor,
-      world: 'MAIN'
-    }).catch(error => {
-      console.warn('Could not inject response interceptor:', error);
-    });
+    // No longer injecting scripts due to CSP restrictions
+    // We'll use a different approach to monitor conversation data
     
     return {cancel: false};
   },
@@ -117,44 +111,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-// Function to be injected into the main world to intercept fetch responses
-function injectResponseInterceptor() {
-  if (window.chatgptAnalystInjected) return;
-  window.chatgptAnalystInjected = true;
-  
-  // Store original fetch
-  const originalFetch = window.fetch;
-  
-  // Override fetch to intercept ChatGPT responses
-  window.fetch = async function(...args) {
-    const response = await originalFetch.apply(this, args);
-    
-    // Check if this is a ChatGPT conversation GET endpoint (contains conversation ID)
-    const url = args[0];
-    if (url && typeof url === 'string' && 
-        url.includes('/backend-api/conversation/') && 
-        url.match(/\/backend-api\/conversation\/[a-f0-9-]{36}$/)) {
-      
-      console.log('ChatGPT Analyst: Intercepting conversation data from:', url);
-      const clonedResponse = response.clone();
-      
-      try {
-        const data = await clonedResponse.text();
-        // Send the response data to content script
-        window.postMessage({
-          type: 'CHATGPT_RESPONSE_INTERCEPTED',
-          url: url,
-          data: data,
-          timestamp: Date.now(),
-          method: 'GET'
-        }, '*');
-      } catch (error) {
-        console.warn('Error intercepting ChatGPT conversation data:', error);
-      }
-    }
-    
-    return response;
-  };
+// Extract conversation ID from ChatGPT URL
+function extractConversationId(url) {
+  const match = url.match(/\/c\/([a-f0-9-]{36})/);
+  return match ? match[1] : null;
 }
 
 console.log("[ChatGPT Analyst] Background service worker loaded and monitoring network traffic"); 
