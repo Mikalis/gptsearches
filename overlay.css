@@ -699,6 +699,61 @@
   flex-wrap: wrap;
 }
 
+.error-actions button, .action-buttons button {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.error-actions button:hover, .action-buttons button:hover {
+  background: #45a049;
+}
+
+.primary-btn {
+  background: #2196F3 !important;
+  font-weight: bold;
+  padding: 10px 20px !important;
+  font-size: 14px !important;
+}
+
+.primary-btn:hover {
+  background: #1976D2 !important;
+}
+
+.solution-steps {
+  margin: 15px 0;
+  padding: 15px;
+  background: rgba(76, 175, 80, 0.1);
+  border-left: 4px solid #4CAF50;
+  border-radius: 4px;
+}
+
+.solution-steps h6 {
+  margin: 0 0 10px 0;
+  color: #4CAF50;
+  font-weight: bold;
+}
+
+.solution-steps ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.solution-steps li {
+  margin: 8px 0;
+  line-height: 1.4;
+}
+
+.action-buttons {
+  margin-top: 15px;
+  text-align: center;
+}
+
 .new-conversation-btn {
   background: linear-gradient(135deg, #10b981, #059669);
   color: white;

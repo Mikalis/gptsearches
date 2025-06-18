@@ -475,12 +475,18 @@ window.addEventListener('message', (event) => {
       }
     } else if (event.data.type === 'CHATGPT_CONVERSATION_ERROR') {
       console.error('[ChatGPT Analyst] Received conversation error:', event.data.error);
+      
+      let errorMessage = `Failed to fetch conversation data: ${event.data.error}`;
+      let isConversationNotFound = event.data.error.includes('Conversation not found') || 
+                                  event.data.error.includes('conversation_not_found');
+      
       showAnalysisResult({
         hasData: false,
         searchQueries: [],
         thoughts: [],
         reasoning: [],
-        error: `Failed to fetch conversation data: ${event.data.error}`
+        error: errorMessage,
+        isConversationNotFound: isConversationNotFound
       });
     }
   }
@@ -825,7 +831,26 @@ function showAnalysisResult(analysisData) {
     statusDiv.textContent = `Error: ${analysisData.error}`;
     
     let troubleshootingTips = '';
-    if (analysisData.error.includes('404')) {
+    if (analysisData.isConversationNotFound) {
+      troubleshootingTips = `
+        <div class="troubleshooting">
+          <h5>🆕 This Conversation is No Longer Available</h5>
+          <p>The conversation you're trying to analyze has expired or been deleted from ChatGPT.</p>
+          <div class="solution-steps">
+            <h6>✅ To test the extension, please:</h6>
+            <ol>
+              <li><strong>Start a new conversation</strong> with ChatGPT</li>
+              <li><strong>Ask a research question</strong> (e.g., "What are the latest developments in AI?")</li>
+              <li><strong>Wait for ChatGPT's response</strong> to fully load</li>
+              <li><strong>Click "Analyze"</strong> again to extract the search data</li>
+            </ol>
+          </div>
+          <div class="action-buttons">
+            <button onclick="window.open('https://chatgpt.com/', '_blank')" class="primary-btn">🚀 Start New Conversation</button>
+          </div>
+        </div>
+      `;
+    } else if (analysisData.error.includes('404')) {
       troubleshootingTips = `
         <div class="troubleshooting">
           <h5>💡 Troubleshooting Tips:</h5>
