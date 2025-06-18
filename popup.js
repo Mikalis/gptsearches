@@ -1,5 +1,5 @@
-// ChatGPT Analyst - Enhanced Popup Script
-console.log('🎉 ChatGPT Analyst popup loading...');
+// ChatGPT Analyst - Popup with Manual Analysis
+alconsole.log('🎉 ChatGPT Analyst popup loading...');
 
 document.addEventListener('DOMContentLoaded', () => {
   // DOM elements
@@ -9,6 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const tipsContent = document.getElementById('tips-content');
   const settingsHeader = document.getElementById('settings-header');
   const settingsContent = document.getElementById('settings-content');
+  const resultsSection = document.getElementById('results-section');
+  const resultsHeader = document.getElementById('results-header');
+  const resultsContent = document.getElementById('results-content');
+  const resultsInner = document.getElementById('results-inner');
   const statusIndicator = document.getElementById('status-indicator');
   const statusText = statusIndicator.querySelector('.status-text');
   const statusDot = statusIndicator.querySelector('.status-dot');
@@ -17,13 +21,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const thoughtsCount = document.getElementById('thoughts-count');
   
   // Settings elements
-  const autoAnalyzeToggle = document.getElementById('auto-analyze');
   const showDebugToggle = document.getElementById('show-debug');
-  const realtimeUpdatesToggle = document.getElementById('realtime-updates');
+  const clearOnNewToggle = document.getElementById('clear-on-new');
   
   // State
   let currentTab = null;
-  let analysisData = null;
+  let currentAnalysis = null;
   
   // Initialize
   init();
@@ -31,7 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
   async function init() {
     try {
       await loadSettings();
-      await loadAnalysisData();
       await checkTabStatus();
       setupEventListeners();
       updateUI();
@@ -46,38 +48,16 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadSettings() {
     try {
       const settings = await chrome.storage.sync.get({
-        autoAnalyze: true,
         showDebug: false,
-        realtimeUpdates: true
+        clearOnNew: true
       });
       
-      autoAnalyzeToggle.checked = settings.autoAnalyze;
       showDebugToggle.checked = settings.showDebug;
-      realtimeUpdatesToggle.checked = settings.realtimeUpdates;
+      clearOnNewToggle.checked = settings.clearOnNew;
       
       console.log('📋 Settings loaded:', settings);
     } catch (error) {
       console.error('❌ Error loading settings:', error);
-    }
-  }
-  
-  async function loadAnalysisData() {
-    try {
-      const result = await chrome.storage.local.get(['analysisData', 'conversationData']);
-      analysisData = result.analysisData;
-      
-      if (analysisData) {
-        updateStats(analysisData);
-        updateStatus('success', 'Analysis data found');
-      } else if (result.conversationData) {
-        updateStatus('ready', 'Conversation detected - ready to analyze');
-      } else {
-        updateStatus('waiting', 'Waiting for conversation data');
-      }
-      
-      console.log('📊 Analysis data loaded:', analysisData);
-    } catch (error) {
-      console.error('❌ Error loading analysis data:', error);
     }
   }
   
@@ -100,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       
       analyzeBtn.disabled = false;
-      updateStatus('ready', 'Ready to analyze conversations');
+      updateStatus('ready', 'Ready to analyze conversation');
       
     } catch (error) {
       console.error('❌ Error checking tab status:', error);
@@ -112,21 +92,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // Expandable sections
     tipsHeader.addEventListener('click', () => toggleSection(tipsContent, tipsHeader));
     settingsHeader.addEventListener('click', () => toggleSection(settingsContent, settingsHeader));
+    resultsHeader.addEventListener('click', () => toggleSection(resultsContent, resultsHeader));
     
     // Settings toggles
-    autoAnalyzeToggle.addEventListener('change', () => updateSetting('autoAnalyze', autoAnalyzeToggle.checked));
     showDebugToggle.addEventListener('change', () => updateSetting('showDebug', showDebugToggle.checked));
-    realtimeUpdatesToggle.addEventListener('change', () => updateSetting('realtimeUpdates', realtimeUpdatesToggle.checked));
+    clearOnNewToggle.addEventListener('change', () => updateSetting('clearOnNew', clearOnNewToggle.checked));
     
     // Action buttons
     analyzeBtn.addEventListener('click', handleAnalyzeClick);
     newConversationBtn.addEventListener('click', handleNewConversationClick);
-    
-    // Storage listeners
-    chrome.storage.onChanged.addListener(handleStorageChange);
-    
-    // Auto-refresh every 2 seconds when popup is open
-    setInterval(refreshData, 2000);
   }
   
   function toggleSection(contentElement, headerElement) {
@@ -142,25 +116,11 @@ document.addEventListener('DOMContentLoaded', () => {
       expandIcon.textContent = '▲';
       expandIcon.style.transform = 'rotate(180deg)';
     }
-    
-    // Add animation class
-    contentElement.style.transition = 'max-height 0.3s ease';
   }
   
   async function updateSetting(key, value) {
     try {
       await chrome.storage.sync.set({ [key]: value });
-      
-      // Send message to content script
-      if (currentTab && (currentTab.url.includes('chatgpt.com') || currentTab.url.includes('chat.openai.com'))) {
-        chrome.tabs.sendMessage(currentTab.id, {
-          action: 'updateSettings',
-          settings: { [key]: value }
-        }).catch(() => {
-          // Content script not ready, ignore
-        });
-      }
-      
       showNotification(`Setting updated: ${key}`);
       console.log(`⚙️ Setting updated: ${key} = ${value}`);
     } catch (error) {
@@ -177,27 +137,49 @@ document.addEventListener('DOMContentLoaded', () => {
       analyzeBtn.disabled = true;
       analyzeBtn.innerHTML = '<span class="section-icon">⏳</span>Analyzing...';
       
-      // Send analyze message to content script
-      const response = await chrome.tabs.sendMessage(currentTab.id, {
-        action: 'analyzeConversation',
-        manual: true
-      });
+      // Get conversation data from storage
+      const result = await chrome.storage.local.get(['conversationData']);
       
-      setTimeout(async () => {
-        await loadAnalysisData();
-        analyzeBtn.disabled = false;
-        analyzeBtn.innerHTML = '<span class="section-icon">🔍</span>Analyze Conversation';
-      }, 1500);
+      if (!result.conversationData) {
+        showNotification('No conversation data found. Try refreshing the ChatGPT page.', 'error');
+        updateStatus('error', 'No conversation data found');
+        resetAnalyzeButton();
+        return;
+      }
       
-      showNotification('Analysis started');
+      // Extract and analyze data
+      const analysis = extractSearchAndReasoning(result.conversationData);
+      
+      if (!analysis || (!analysis.searchQueries.length && !analysis.thoughts.length && 
+          !analysis.sources.length && !analysis.reasoning.length)) {
+        showNotification('No analysis data found in conversation.', 'error');
+        updateStatus('ready', 'No analysis data found');
+        resetAnalyzeButton();
+        return;
+      }
+      
+      // Store analysis and display results
+      currentAnalysis = analysis;
+      await chrome.storage.local.set({ analysisData: analysis });
+      
+      displayResults(analysis);
+      updateStats(analysis);
+      updateStatus('success', `Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
+      showNotification(`Analysis complete! Found ${analysis.searchQueries.length} queries, ${analysis.thoughts.length} thoughts`);
+      
+      resetAnalyzeButton();
       
     } catch (error) {
       console.error('❌ Error during analysis:', error);
       updateStatus('error', 'Analysis failed - try refreshing the page');
-      analyzeBtn.disabled = false;
-      analyzeBtn.innerHTML = '<span class="section-icon">🔍</span>Analyze Conversation';
-      showNotification('Analysis failed', 'error');
+      showNotification('Analysis failed: ' + error.message, 'error');
+      resetAnalyzeButton();
     }
+  }
+  
+  function resetAnalyzeButton() {
+    analyzeBtn.disabled = false;
+    analyzeBtn.innerHTML = '<span class="section-icon">🔍</span>Analyze Conversation';
   }
   
   function handleNewConversationClick() {
@@ -205,30 +187,288 @@ document.addEventListener('DOMContentLoaded', () => {
     window.close();
   }
   
-  function handleStorageChange(changes, namespace) {
-    if (namespace === 'local') {
-      if (changes.analysisData) {
-        analysisData = changes.analysisData.newValue;
-        updateStats(analysisData);
-        if (analysisData) {
-          updateStatus('success', `Found ${analysisData.searchQueries?.length || 0} queries, ${analysisData.thoughts?.length || 0} thoughts`);
-        }
+  // Analysis extraction logic (copied from content script)
+  function extractSearchAndReasoning(conversationData) {
+    console.log('🔍 Extracting comprehensive data from conversation...');
+    
+    const result = {
+      searchQueries: new Set(),
+      thoughts: [],
+      sources: [],
+      reasoning: [],
+      userContext: {},
+      metadata: {
+        conversationId: null,
+        totalMessages: 0,
+        analysisTime: new Date().toISOString()
       }
+    };
+
+    if (!conversationData || !conversationData.mapping) {
+      console.warn('⚠️ No valid conversation data found');
+      return result;
+    }
+
+    const mapping = conversationData.mapping;
+    result.metadata.conversationId = conversationData.conversation_id;
+    result.metadata.totalMessages = Object.keys(mapping).length;
+
+    // Process only recent messages (last 10) to show current session data
+    const allNodes = Object.values(mapping).filter(node => node.message);
+    const recentNodes = allNodes.slice(-10); // Only last 10 messages
+    
+    console.log(`📊 Processing ${recentNodes.length} recent messages (from ${allNodes.length} total)`);
+    
+    recentNodes.forEach((node, index) => {
+      const message = node.message;
+      const content = message.content;
+      const metadata = message.metadata || {};
+
+      // Extract search queries from various sources
+      extractSearchQueries(content, metadata, result.searchQueries);
       
-      if (changes.conversationData) {
-        if (changes.conversationData.newValue && !analysisData) {
-          updateStatus('ready', 'New conversation detected');
+      // Extract thoughts
+      extractThoughts(content, result.thoughts);
+      
+      // Extract search results/sources
+      extractSources(metadata, result.sources);
+      
+      // Extract reasoning
+      extractReasoning(content, result.reasoning);
+      
+      // Extract user context
+      extractUserContext(content, result.userContext);
+    });
+
+    // Convert Set to Array for searchQueries
+    result.searchQueries = Array.from(result.searchQueries);
+
+    console.log('📊 Extraction complete:', {
+      searchQueries: result.searchQueries.length,
+      thoughts: result.thoughts.length,
+      sources: result.sources.length,
+      reasoning: result.reasoning.length,
+      userContext: Object.keys(result.userContext).length
+    });
+
+    return result;
+  }
+  
+  function extractSearchQueries(content, metadata, queriesSet) {
+    // Method 1: Extract from search() function calls in code blocks
+    if (content.content_type === 'code' && content.text) {
+      const searchMatches = content.text.match(/search\(['"](.*?)['"]\)/g);
+      if (searchMatches) {
+        searchMatches.forEach(match => {
+          const query = match.match(/search\(['"](.*?)['"]\)/)[1];
+          if (query.trim()) {
+            queriesSet.add(query.trim());
+          }
+        });
+      }
+    }
+
+    // Method 2: Extract from metadata search_queries
+    if (metadata.search_queries && Array.isArray(metadata.search_queries)) {
+      metadata.search_queries.forEach(searchQuery => {
+        if (searchQuery.q && searchQuery.q.trim()) {
+          queriesSet.add(searchQuery.q.trim());
         }
+      });
+    }
+
+    // Method 3: Extract from JSON content in code blocks
+    if (content.content_type === 'code' && content.text) {
+      try {
+        const jsonMatch = content.text.match(/\{.*"search_query".*\}/s);
+        if (jsonMatch) {
+          const jsonData = JSON.parse(jsonMatch[0]);
+          if (jsonData.search_query && Array.isArray(jsonData.search_query)) {
+            jsonData.search_query.forEach(item => {
+              if (item.q && item.q.trim()) {
+                queriesSet.add(item.q.trim());
+              }
+            });
+          }
+        }
+      } catch (e) {
+        // JSON parsing failed, ignore
+      }
+    }
+  }
+
+  function extractThoughts(content, thoughtsArray) {
+    if (content.content_type === 'thoughts' && content.thoughts) {
+      content.thoughts.forEach(thought => {
+        thoughtsArray.push({
+          summary: thought.summary || 'Thought',
+          content: thought.content || '',
+          timestamp: new Date().toISOString()
+        });
+      });
+    }
+  }
+
+  function extractSources(metadata, sourcesArray) {
+    if (metadata.search_result_groups && Array.isArray(metadata.search_result_groups)) {
+      metadata.search_result_groups.forEach(group => {
+        if (group.entries && Array.isArray(group.entries)) {
+          group.entries.forEach(entry => {
+            sourcesArray.push({
+              title: entry.title || 'Untitled',
+              url: entry.url || '#',
+              snippet: entry.snippet || '',
+              domain: group.domain || 'Unknown',
+              attribution: entry.attribution || group.domain || 'Unknown'
+            });
+          });
+        }
+      });
+    }
+  }
+
+  function extractReasoning(content, reasoningArray) {
+    if (content.content_type === 'reasoning_recap') {
+      reasoningArray.push({
+        type: 'recap',
+        content: content.content || '',
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  function extractUserContext(content, userContextObj) {
+    if (content.content_type === 'user_editable_context') {
+      if (content.user_profile) {
+        userContextObj.profile = content.user_profile;
+      }
+      if (content.user_instructions) {
+        userContextObj.instructions = content.user_instructions;
       }
     }
   }
   
-  async function refreshData() {
-    try {
-      await loadAnalysisData();
-    } catch (error) {
-      // Silent fail for background refresh
+  function displayResults(analysis) {
+    if (!analysis) {
+      resultsInner.innerHTML = '<div class="no-results">No analysis data available</div>';
+      return;
     }
+    
+    let html = '';
+    
+    // Search Queries
+    if (analysis.searchQueries.length > 0) {
+      html += createResultSection('🔍', 'Search Queries', analysis.searchQueries, 'query');
+    }
+    
+    // Thoughts
+    if (analysis.thoughts.length > 0) {
+      const thoughtTexts = analysis.thoughts.map(t => `${t.summary}: ${t.content.substring(0, 100)}...`);
+      html += createResultSection('🧠', 'ChatGPT Thoughts', thoughtTexts, 'thought');
+    }
+    
+    // Sources
+    if (analysis.sources.length > 0) {
+      const sourceTexts = analysis.sources.slice(0, 5).map(s => `${s.title} (${s.domain})`);
+      html += createResultSection('📚', 'Sources & Research', sourceTexts, 'source');
+    }
+    
+    // Reasoning
+    if (analysis.reasoning.length > 0) {
+      const reasoningTexts = analysis.reasoning.map(r => r.content.substring(0, 100) + '...');
+      html += createResultSection('⚡', 'Reasoning Process', reasoningTexts, 'reasoning');
+    }
+    
+    // Export button
+    html += '<button class="export-btn" id="export-btn">📥 Export Analysis Data</button>';
+    
+    resultsInner.innerHTML = html || '<div class="no-results">No results found in current conversation</div>';
+    
+    // Show results section
+    resultsSection.style.display = 'block';
+    if (!resultsContent.classList.contains('expanded')) {
+      toggleSection(resultsContent, resultsHeader);
+    }
+    
+    // Setup export button
+    const exportBtn = document.getElementById('export-btn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => exportAnalysisData(analysis));
+    }
+    
+    // Setup copy buttons
+    document.querySelectorAll('.result-copy-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const text = e.target.getAttribute('data-text');
+        copyToClipboard(text);
+      });
+    });
+  }
+  
+  function createResultSection(icon, title, items, type) {
+    if (!items || items.length === 0) return '';
+    
+    let html = `<div class="result-category">${icon} ${title}</div>`;
+    html += '<div class="results-list">';
+    
+    items.forEach(item => {
+      const displayText = item.length > 80 ? item.substring(0, 80) + '...' : item;
+      html += `
+        <div class="result-item">
+          ${escapeHtml(displayText)}
+          <button class="result-copy-btn" data-text="${escapeHtml(item)}" title="Copy">📋</button>
+        </div>
+      `;
+    });
+    
+    html += '</div>';
+    return html;
+  }
+  
+  async function exportAnalysisData(analysis) {
+    try {
+      const data = {
+        timestamp: new Date().toISOString(),
+        conversationId: analysis.metadata?.conversationId || 'unknown',
+        searchQueries: analysis.searchQueries,
+        thoughts: analysis.thoughts,
+        sources: analysis.sources,
+        reasoning: analysis.reasoning,
+        userContext: analysis.userContext,
+        metadata: analysis.metadata
+      };
+      
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      await chrome.downloads.download({
+        url: url,
+        filename: `chatgpt-analysis-${new Date().toISOString().split('T')[0]}.json`,
+        saveAs: true
+      });
+      
+      showNotification('Analysis data exported successfully!');
+      
+    } catch (error) {
+      console.error('❌ Error exporting data:', error);
+      showNotification('Failed to export data', 'error');
+    }
+  }
+  
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showNotification('Copied to clipboard!');
+    } catch (error) {
+      console.error('❌ Error copying to clipboard:', error);
+      showNotification('Failed to copy to clipboard', 'error');
+    }
+  }
+  
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
   
   function updateStats(data) {
@@ -245,15 +485,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (queries > 0 || thoughts > 0) {
       statsGrid.style.display = 'grid';
-      
-      // Add animation to stats
-      queriesCount.style.animation = 'none';
-      thoughtsCount.style.animation = 'none';
-      
-      setTimeout(() => {
-        queriesCount.style.animation = 'pulse 0.5s ease';
-        thoughtsCount.style.animation = 'pulse 0.5s ease';
-      }, 10);
     } else {
       statsGrid.style.display = 'none';
     }

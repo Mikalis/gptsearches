@@ -443,6 +443,81 @@
             animation: slideIn 0.4s ease-out;
         }
         
+        /* Analysis Results Styles */
+        .results-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .result-item {
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            background: rgba(79, 195, 247, 0.05);
+            border: 1px solid rgba(79, 195, 247, 0.2);
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #e8eaed;
+            transition: all 0.2s ease;
+        }
+        
+        .result-item:hover {
+            background: rgba(79, 195, 247, 0.08);
+        }
+        
+        .result-category {
+            font-weight: 600;
+            color: #4fc3f7;
+            margin-bottom: 8px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .result-copy-btn {
+            background: rgba(79, 195, 247, 0.1);
+            border: 1px solid rgba(79, 195, 247, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            cursor: pointer;
+            font-size: 10px;
+            color: #4fc3f7;
+            margin-left: auto;
+            transition: all 0.2s ease;
+        }
+        
+        .result-copy-btn:hover {
+            background: rgba(79, 195, 247, 0.2);
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 20px;
+            color: rgba(232, 234, 237, 0.6);
+            font-size: 13px;
+        }
+        
+        .export-btn {
+            background: linear-gradient(135deg, #81c784, #66bb6a);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-top: 12px;
+            width: 100%;
+        }
+        
+        .export-btn:hover {
+            background: linear-gradient(135deg, #66bb6a, #4caf50);
+            transform: translateY(-1px);
+        }
+        
         /* Responsive adjustments */
         @media (max-height: 600px) {
             .main-content {
@@ -493,6 +568,22 @@
                 </button>
             </div>
             
+            <!-- Analysis Results Section -->
+            <div class="expandable-section" id="results-section" style="display: none;">
+                <div class="section-header" id="results-header">
+                    <div class="section-title">
+                        <span class="section-icon">📊</span>
+                        Analysis Results
+                    </div>
+                    <span class="expand-icon">▼</span>
+                </div>
+                <div class="section-content expanded" id="results-content">
+                    <div class="section-inner" id="results-inner">
+                        <!-- Dynamic content will be inserted here -->
+                    </div>
+                </div>
+            </div>
+            
             <div class="expandable-section">
                 <div class="section-header" id="tips-header">
                     <div class="section-title">
@@ -505,10 +596,10 @@
                     <div class="section-inner">
                         <ul class="tips-list">
                             <li>Ask ChatGPT questions that require research or web searches</li>
+                            <li>Wait for ChatGPT to finish its complete response</li>
                             <li>Click "Analyze Conversation" to extract search queries and reasoning</li>
-                            <li>For best results, wait for ChatGPT to finish its complete response</li>
-                            <li>Start a new conversation if you don't see any results after a search</li>
-                            <li>The plugin works automatically - just browse normally on ChatGPT</li>
+                            <li>Use Ctrl+Shift+A on the page for a quick reminder</li>
+                            <li>The plugin only analyzes when you click the button - no automatic analysis</li>
                         </ul>
                     </div>
                 </div>
@@ -526,16 +617,6 @@
                     <div class="section-inner">
                         <div class="setting-row">
                             <div>
-                                <div class="setting-label">Auto-analyze conversations</div>
-                                <div class="setting-description">Automatically capture data from new conversations</div>
-                            </div>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="auto-analyze" checked>
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <div class="setting-row">
-                            <div>
                                 <div class="setting-label">Show debug information</div>
                                 <div class="setting-description">Display technical details for troubleshooting</div>
                             </div>
@@ -546,11 +627,11 @@
                         </div>
                         <div class="setting-row">
                             <div>
-                                <div class="setting-label">Real-time updates</div>
-                                <div class="setting-description">Update analysis as conversation progresses</div>
+                                <div class="setting-label">Clear data on new conversation</div>
+                                <div class="setting-description">Automatically clear old analysis when switching conversations</div>
                             </div>
                             <label class="toggle-switch">
-                                <input type="checkbox" id="realtime-updates" checked>
+                                <input type="checkbox" id="clear-on-new" checked>
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
