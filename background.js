@@ -63,7 +63,7 @@ chrome.webRequest.onCompleted.addListener(
       
       // Send a simple notification to content script that a request completed
       chrome.tabs.sendMessage(tabId, {
-        action: "requestCompleted",
+        action: "analyzeResponse",
         url: details.url,
         timestamp: Date.now(),
         requestCount: requestCounts[tabId]

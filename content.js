@@ -412,8 +412,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('[ChatGPT Analyst] Received message:', request);
   
   switch (request.action) {
-    case 'requestCompleted':
-      // Trigger analysis when we detect ChatGPT activity
+    case 'analyzeResponse':
+      // Legacy handler - trigger analysis when we detect ChatGPT activity
+      console.log('[ChatGPT Analyst] Legacy analyze response triggered, using new direct approach');
       analyzeCurrentConversation();
       sendResponse({ status: 'success', timestamp: Date.now() });
       break;
@@ -795,38 +796,7 @@ function showAnalysisResult(analysisData) {
   });
 }
 
-// Wait for intercepted response data (legacy for POST requests)
-function waitForInterceptedResponse(url) {
-  return new Promise((resolve) => {
-    // Check if we already have the data
-    if (interceptedResponses.has(url)) {
-      const data = interceptedResponses.get(url);
-      interceptedResponses.delete(url); // Clean up
-      resolve(data);
-      return;
-    }
-    
-    // Wait up to 10 seconds for the data to arrive
-    let attempts = 0;
-    const maxAttempts = 50; // 10 seconds with 200ms intervals
-    
-    const checkForData = () => {
-      attempts++;
-      
-      if (interceptedResponses.has(url)) {
-        const data = interceptedResponses.get(url);
-        interceptedResponses.delete(url); // Clean up
-        resolve(data);
-      } else if (attempts >= maxAttempts) {
-        resolve(null); // Timeout
-      } else {
-        setTimeout(checkForData, 200);
-      }
-    };
-    
-    checkForData();
-  });
-}
+// Clean up function - no longer needed with direct API approach
 
 // Initialize the extension
 async function initializeChatGPTAnalyst() {
@@ -867,105 +837,8 @@ async function initializeChatGPTAnalyst() {
 // Initialize when page is ready
 initializeChatGPTAnalyst();
 
-// Try to get data from page JavaScript context
-async function tryGetDataFromPageContext(url) {
-  try {
-    // Wait a bit for the data to be available in the page
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Try to access global variables or cached data that ChatGPT might use
-    const pageData = await new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.textContent = `
-        (function() {
-          // Try to find conversation data in common global variables
-          let data = null;
-          
-          // Check for React state or Redux store
-          if (window.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
-            try {
-              const reactInstances = window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers;
-              // This is a simplified approach - in practice, accessing React state is complex
-            } catch (e) {}
-          }
-          
-          // Check for any global conversation data
-          if (window.conversation || window.conversationData) {
-            data = window.conversation || window.conversationData;
-          }
-          
-          // Post message back to content script
-          window.postMessage({ type: 'CHATGPT_DATA', data: data }, '*');
-        })();
-      `;
-      
-      const messageHandler = (event) => {
-        if (event.source === window && event.data.type === 'CHATGPT_DATA') {
-          window.removeEventListener('message', messageHandler);
-          document.head.removeChild(script);
-          resolve(event.data.data);
-        }
-      };
-      
-      window.addEventListener('message', messageHandler);
-      document.head.appendChild(script);
-      
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        window.removeEventListener('message', messageHandler);
-        if (script.parentNode) script.parentNode.removeChild(script);
-        resolve(null);
-      }, 5000);
-    });
-    
-    return pageData;
-  } catch (error) {
-    console.warn('[ChatGPT Analyst] Could not access page context:', error);
-    return null;
-  }
-}
-
-// Try to get data from DOM elements
-async function tryGetDataFromDOM() {
-  try {
-    // Look for conversation data in DOM attributes or text content
-    // ChatGPT might store data in hidden elements or data attributes
-    
-    const dataElements = document.querySelectorAll('[data-conversation], [data-message], script[type="application/json"]');
-    
-    for (const element of dataElements) {
-      try {
-        let content = element.textContent || element.getAttribute('data-conversation') || element.getAttribute('data-message');
-        if (content) {
-          const parsedData = JSON.parse(content);
-          if (parsedData && parsedData.mapping) {
-            return parsedData;
-          }
-        }
-      } catch (e) {
-        // Continue to next element
-      }
-    }
-    
-    // Try to find data in localStorage or sessionStorage
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.includes('conversation')) {
-          const data = JSON.parse(localStorage.getItem(key));
-          if (data && data.mapping) {
-            return data;
-          }
-        }
-      }
-    } catch (e) {}
-    
-    return null;
-  } catch (error) {
-    console.warn('[ChatGPT Analyst] Could not access DOM data:', error);
-    return null;
-  }
-}
+// Legacy functions removed - no longer needed with direct API approach
+// These functions violated CSP by injecting inline scripts
 
 // Global functions for inline event handlers
 window.copyToClipboard = copyToClipboard; 
