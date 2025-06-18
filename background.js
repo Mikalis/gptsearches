@@ -1,5 +1,5 @@
-// ChatGPT Analyst - Background Script
-console.log("[ChatGPT Analyst] Background script loaded");
+// ChatGPT Analyst - Enhanced Background Script
+console.log("🚀 [ChatGPT Analyst] Enhanced background script loaded");
 
 // Store active debugger sessions
 const activeDebuggers = new Set();
