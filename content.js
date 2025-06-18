@@ -907,13 +907,7 @@ function analyzeCurrentConversation() {
       }, (response) => {
         if (chrome.runtime.lastError) {
           console.error('[ChatGPT Analyst] Debugger capture error:', chrome.runtime.lastError.message);
-          showAnalysisResult({
-            hasData: false,
-            searchQueries: [],
-            thoughts: [],
-            reasoning: [],
-            error: `Debugger capture error: ${chrome.runtime.lastError.message}. Try reloading the extension.`
-          });
+          handleDebuggerCaptureError(chrome.runtime.lastError.message);
           return;
         }
         
@@ -921,13 +915,7 @@ function analyzeCurrentConversation() {
       });
     } catch (err) {
       console.error('[ChatGPT Analyst] Error sending message to background script:', err);
-      showAnalysisResult({
-        hasData: false,
-        searchQueries: [],
-        thoughts: [],
-        reasoning: [],
-        error: `Extension communication error: ${err.message}. Try reloading the extension.`
-      });
+      handleDebuggerCaptureError(err.message);
     }
   });
 }
