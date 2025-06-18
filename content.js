@@ -522,6 +522,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ status: 'success' });
       break;
       
+    case 'networkData':
+      processNetworkData(request);
+      break;
+      
     default:
       console.warn('[ChatGPT Analyst] Unknown action:', request.action);
       sendResponse({ status: 'error', message: 'Unknown action' });
@@ -613,7 +617,7 @@ function analyzeCurrentConversation() {
   
   // Request page refresh to capture network data
   chrome.runtime.sendMessage({
-    action: "refreshAndCapture",
+    action: "debuggerCapture",
     conversationId: conversationId
   }, (response) => {
     if (chrome.runtime.lastError) {

@@ -8,7 +8,8 @@
     "scripting",
     "webRequest",
     "webRequestBlocking",
-    "storage"
+    "storage",
+    "debugger"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",

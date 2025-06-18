@@ -331,4 +331,69 @@ function extractConversationIdFromUrl(url) {
   return match ? match[1] : null;
 }
 
-console.log("[ChatGPT Analyst] Network monitoring background script loaded"); 
+console.log("[ChatGPT Analyst] Network monitoring background script loaded");
+
+// ---------------- Debugger-based response capture -----------------
+function attachDebuggerAndCapture(tabId, conversationId) {
+  chrome.debugger.attach({tabId}, "1.3", () => {
+    if (chrome.runtime.lastError) {
+      console.warn('[ChatGPT Analyst] Debugger attach failed:', chrome.runtime.lastError.message);
+      return;
+    }
+    console.log(`[ChatGPT Analyst] 🐞 Debugger attached to tab ${tabId}`);
+    chrome.debugger.sendCommand({tabId}, 'Network.enable');
+  });
+  
+  function onEvent(source, method, params) {
+    if (source.tabId !== tabId) return;
+    if (method === 'Network.responseReceived') {
+      const {requestId, response} = params;
+      if (response.mimeType === 'application/json' &&
+          response.url.includes('/backend-api/conversation/') &&
+          response.url.includes(conversationId) &&
+          !response.url.includes('/textdocs') &&
+          !response.url.includes('/attachments')) {
+        console.log('[ChatGPT Analyst] 🎯 Debugger matched response:', response.url);
+        chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[ChatGPT Analyst] getResponseBody error:', chrome.runtime.lastError.message);
+            return;
+          }
+          let body = bodyResult.body;
+          if (bodyResult.base64Encoded) {
+            body = atob(body);
+          }
+          try {
+            const jsonData = JSON.parse(body);
+            console.log('[ChatGPT Analyst] ✅ Debugger captured JSON');
+            // send to content script
+            chrome.tabs.sendMessage(tabId, {
+              action: 'networkData',
+              source: 'debugger_capture',
+              url: response.url,
+              conversationId,
+              timestamp: Date.now(),
+              data: jsonData
+            });
+          } catch(e) {
+            console.warn('[ChatGPT Analyst] JSON parse error debugger:', e);
+          }
+          // Detach after first capture
+          chrome.debugger.onEvent.removeListener(onEvent);
+          chrome.debugger.detach({tabId});
+          console.log('[ChatGPT Analyst] 🐞 Debugger detached');
+        });
+      }
+    }
+  }
+  chrome.debugger.onEvent.addListener(onEvent);
+}
+
+// Message listener for debugger capture
+chrome.runtime.onMessage.addListener((request, sender, sendResponse)=>{
+  if(request.action==='debuggerCapture' && sender.tab){
+    attachDebuggerAndCapture(sender.tab.id, request.conversationId);
+    sendResponse({success:true});
+    return true;
+  }
+}); 
