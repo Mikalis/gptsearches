@@ -524,6 +524,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       
     case 'networkData':
       processNetworkData(request);
+      sendResponse({ status: 'success' });
+      break;
+      
+    case 'debuggerError':
+      console.error('[ChatGPT Analyst] Debugger error:', request.error);
+      showAnalysisResult({
+        hasData: false,
+        searchQueries: [],
+        thoughts: [],
+        reasoning: [],
+        error: request.error
+      });
+      sendResponse({ status: 'success' });
       break;
       
     default:
@@ -582,11 +595,9 @@ function getCurrentConversationId() {
   return match ? match[1] : null;
 }
 
-// Network interception approach - no longer need direct API calls
-
 // NETWORK MONITORING APPROACH: Refresh page and capture JSON from network traffic
 function analyzeCurrentConversation() {
-  console.log('[ChatGPT Analyst] 🔄 Starting network-based analysis...');
+  console.log('[ChatGPT Analyst] 🔄 Starting debugger-based analysis...');
   console.log('[ChatGPT Analyst] Current URL:', window.location.href);
   
   const conversationId = getCurrentConversationId();
@@ -604,48 +615,73 @@ function analyzeCurrentConversation() {
   }
   
   console.log('[ChatGPT Analyst] Found conversation ID:', conversationId);
-  console.log('[ChatGPT Analyst] Will refresh page to capture network traffic...');
+  console.log('[ChatGPT Analyst] Will attach debugger to capture network traffic...');
   
-  // Show refreshing state
+  // Show loading state
   showAnalysisResult({
     hasData: false,
     searchQueries: [],
     thoughts: [],
     reasoning: [],
-    isRefreshing: true
+    isLoading: true
   });
   
-  // Request page refresh to capture network data
-  chrome.runtime.sendMessage({
-    action: "debuggerCapture",
-    conversationId: conversationId
-  }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.error('[ChatGPT Analyst] Extension communication error:', chrome.runtime.lastError);
+  // Try direct fetch first as a test
+  fetch(`https://chatgpt.com/backend-api/conversation/${conversationId}`, {
+    credentials: 'include',
+    headers: {
+      'Accept': 'application/json'
+    }
+  })
+  .then(response => {
+    console.log('[ChatGPT Analyst] Test fetch response:', response.status, response.statusText);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    console.log('[ChatGPT Analyst] Direct fetch successful!', data);
+    processNetworkData({
+      data: data,
+      conversationId: conversationId,
+      url: `https://chatgpt.com/backend-api/conversation/${conversationId}`,
+      timestamp: Date.now(),
+      source: 'direct_fetch'
+    });
+  })
+  .catch(error => {
+    console.log('[ChatGPT Analyst] Direct fetch failed, using debugger capture:', error.message);
+    
+    // Request debugger capture from background script
+    try {
+      chrome.runtime.sendMessage({
+        action: "debuggerCapture",
+        conversationId: conversationId
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error('[ChatGPT Analyst] Debugger capture error:', chrome.runtime.lastError.message);
+          showAnalysisResult({
+            hasData: false,
+            searchQueries: [],
+            thoughts: [],
+            reasoning: [],
+            error: `Debugger capture error: ${chrome.runtime.lastError.message}. Try reloading the extension.`
+          });
+          return;
+        }
+        
+        console.log('[ChatGPT Analyst] Debugger capture initiated:', response);
+      });
+    } catch (err) {
+      console.error('[ChatGPT Analyst] Error sending message to background script:', err);
       showAnalysisResult({
         hasData: false,
         searchQueries: [],
         thoughts: [],
         reasoning: [],
-        error: 'Extension communication error. Please reload the page and try again.'
+        error: `Extension communication error: ${err.message}. Try reloading the extension.`
       });
-      return;
-    }
-    
-    if (response && response.error) {
-      console.error('[ChatGPT Analyst] Refresh and capture error:', response.error);
-      showAnalysisResult({
-        hasData: false,
-        searchQueries: [],
-        thoughts: [],
-        reasoning: [],
-        error: response.error
-      });
-      return;
-    }
-    
-    if (response && response.action === 'refreshing') {
-      console.log('[ChatGPT Analyst] Page refresh initiated, network monitoring active...');
     }
   });
 }
@@ -1055,16 +1091,16 @@ async function initializeChatGPTAnalyst() {
     contentDiv.innerHTML = `
       <div class="init-message">
         <h4>🔍 ChatGPT SEO Analyst Ready</h4>
-        <p>Extension monitors Chrome network traffic to capture conversation data on page refresh.</p>
+        <p>Extension uses Chrome Debugger API to capture conversation data without page refresh.</p>
         <p><strong>How to use:</strong></p>
         <ul>
           <li>Navigate to any ChatGPT conversation</li>
-          <li>Click "Refresh & Analyze" to capture fresh network data</li>
+          <li>Click "Analyze Conversation" to capture network data</li>
           <li>Use <kbd>Ctrl+Shift+A</kbd> for quick analysis</li>
           <li>Use <kbd>Ctrl+Shift+S</kbd> to toggle this overlay</li>
         </ul>
-        <p><small><strong>Note:</strong> Page will refresh automatically to capture network traffic.</small></p>
-        <button class="analyze-btn" data-action="analyze">🔄 Refresh & Analyze</button>
+        <p><small><strong>Note:</strong> You may see a "Debugger attached" notification - this is normal and required to access the network data.</small></p>
+        <button class="analyze-btn" data-action="analyze">🔍 Analyze Conversation</button>
       </div>
     `;
     addPromotionalContent(contentDiv);

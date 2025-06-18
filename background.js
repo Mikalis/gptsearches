@@ -335,65 +335,154 @@ console.log("[ChatGPT Analyst] Network monitoring background script loaded");
 
 // ---------------- Debugger-based response capture -----------------
 function attachDebuggerAndCapture(tabId, conversationId) {
+  console.log(`[ChatGPT Analyst] 🐞 Attaching debugger to tab ${tabId} for conversation ${conversationId}`);
+  
+  // Check if we're already attached to this tab
+  chrome.debugger.getTargets((targets) => {
+    const isAttached = targets.some(target => 
+      target.tabId === tabId && target.attached);
+    
+    if (isAttached) {
+      console.log(`[ChatGPT Analyst] Debugger already attached to tab ${tabId}, detaching first`);
+      chrome.debugger.detach({tabId}, () => {
+        if (chrome.runtime.lastError) {
+          console.warn('[ChatGPT Analyst] Error detaching debugger:', chrome.runtime.lastError.message);
+        }
+        // Re-attach after detaching
+        setTimeout(() => attachDebuggerAndStart(tabId, conversationId), 500);
+      });
+    } else {
+      attachDebuggerAndStart(tabId, conversationId);
+    }
+  });
+}
+
+function attachDebuggerAndStart(tabId, conversationId) {
   chrome.debugger.attach({tabId}, "1.3", () => {
     if (chrome.runtime.lastError) {
       console.warn('[ChatGPT Analyst] Debugger attach failed:', chrome.runtime.lastError.message);
+      chrome.tabs.sendMessage(tabId, {
+        action: 'debuggerError',
+        error: `Failed to attach debugger: ${chrome.runtime.lastError.message}`
+      });
       return;
     }
-    console.log(`[ChatGPT Analyst] 🐞 Debugger attached to tab ${tabId}`);
-    chrome.debugger.sendCommand({tabId}, 'Network.enable');
-  });
-  
-  function onEvent(source, method, params) {
-    if (source.tabId !== tabId) return;
-    if (method === 'Network.responseReceived') {
-      const {requestId, response} = params;
-      if (response.mimeType === 'application/json' &&
-          response.url.includes('/backend-api/conversation/') &&
-          response.url.includes(conversationId) &&
-          !response.url.includes('/textdocs') &&
-          !response.url.includes('/attachments')) {
-        console.log('[ChatGPT Analyst] 🎯 Debugger matched response:', response.url);
-        chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[ChatGPT Analyst] getResponseBody error:', chrome.runtime.lastError.message);
-            return;
-          }
-          let body = bodyResult.body;
-          if (bodyResult.base64Encoded) {
-            body = atob(body);
-          }
-          try {
-            const jsonData = JSON.parse(body);
-            console.log('[ChatGPT Analyst] ✅ Debugger captured JSON');
-            // send to content script
-            chrome.tabs.sendMessage(tabId, {
-              action: 'networkData',
-              source: 'debugger_capture',
-              url: response.url,
-              conversationId,
-              timestamp: Date.now(),
-              data: jsonData
-            });
-          } catch(e) {
-            console.warn('[ChatGPT Analyst] JSON parse error debugger:', e);
-          }
-          // Detach after first capture
-          chrome.debugger.onEvent.removeListener(onEvent);
-          chrome.debugger.detach({tabId});
-          console.log('[ChatGPT Analyst] 🐞 Debugger detached');
-        });
+    
+    console.log(`[ChatGPT Analyst] 🐞 Debugger successfully attached to tab ${tabId}`);
+    
+    // Enable network monitoring
+    chrome.debugger.sendCommand({tabId}, 'Network.enable', {}, (result) => {
+      if (chrome.runtime.lastError) {
+        console.warn('[ChatGPT Analyst] Network.enable failed:', chrome.runtime.lastError.message);
+        chrome.debugger.detach({tabId});
+        return;
       }
-    }
-  }
-  chrome.debugger.onEvent.addListener(onEvent);
+      
+      console.log('[ChatGPT Analyst] 🔍 Network monitoring enabled');
+      
+      // Reload the page to capture fresh traffic
+      chrome.tabs.reload(tabId, {bypassCache: true}, () => {
+        console.log('[ChatGPT Analyst] 🔄 Page reloaded to capture fresh traffic');
+      });
+    });
+    
+    // Set up event listener for responses
+    const onDebuggerEvent = (source, method, params) => {
+      if (source.tabId !== tabId) return;
+      
+      if (method === 'Network.responseReceived') {
+        const {requestId, response} = params;
+        
+        console.log(`[ChatGPT Analyst] 📡 Response received: ${response.url} (${response.status})`);
+        
+        if (response.url.includes(`/backend-api/conversation/${conversationId}`) && 
+            !response.url.includes('/textdocs') && 
+            !response.url.includes('/attachments') &&
+            response.status === 200) {
+          
+          console.log('[ChatGPT Analyst] 🎯 Found target conversation response:', response.url);
+          
+          // Get response body
+          chrome.debugger.sendCommand({tabId}, 'Network.getResponseBody', {requestId}, (bodyResult) => {
+            if (chrome.runtime.lastError) {
+              console.warn('[ChatGPT Analyst] getResponseBody error:', chrome.runtime.lastError.message);
+              return;
+            }
+            
+            try {
+              let body = bodyResult.body;
+              if (bodyResult.base64Encoded) {
+                body = atob(body);
+              }
+              
+              const jsonData = JSON.parse(body);
+              console.log('[ChatGPT Analyst] ✅ Successfully captured conversation JSON:', {
+                url: response.url,
+                status: response.status,
+                hasMapping: !!jsonData.mapping,
+                title: jsonData.title || 'Untitled',
+                dataSize: body.length
+              });
+              
+              // Send to content script
+              chrome.tabs.sendMessage(tabId, {
+                action: 'networkData',
+                source: 'debugger_capture',
+                url: response.url,
+                conversationId: conversationId,
+                timestamp: Date.now(),
+                data: jsonData
+              });
+              
+              // Clean up
+              chrome.debugger.onEvent.removeListener(onDebuggerEvent);
+              chrome.debugger.detach({tabId}, () => {
+                console.log('[ChatGPT Analyst] 🐞 Debugger detached after successful capture');
+              });
+              
+            } catch (e) {
+              console.warn('[ChatGPT Analyst] Error processing response body:', e);
+              chrome.tabs.sendMessage(tabId, {
+                action: 'debuggerError',
+                error: `Error processing response: ${e.message}`
+              });
+            }
+          });
+        }
+      }
+    };
+    
+    chrome.debugger.onEvent.addListener(onDebuggerEvent);
+    
+    // Auto-detach after timeout
+    setTimeout(() => {
+      chrome.debugger.getTargets((targets) => {
+        const stillAttached = targets.some(target => 
+          target.tabId === tabId && target.attached);
+        
+        if (stillAttached) {
+          console.log('[ChatGPT Analyst] ⏰ Timeout - detaching debugger');
+          chrome.debugger.onEvent.removeListener(onDebuggerEvent);
+          chrome.debugger.detach({tabId});
+          
+          // Notify content script
+          chrome.tabs.sendMessage(tabId, {
+            action: 'debuggerError',
+            error: 'Timeout waiting for conversation data. Try refreshing the page manually.'
+          });
+        }
+      });
+    }, 15000);
+  });
 }
 
 // Message listener for debugger capture
-chrome.runtime.onMessage.addListener((request, sender, sendResponse)=>{
-  if(request.action==='debuggerCapture' && sender.tab){
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'debuggerCapture' && sender.tab) {
+    console.log('[ChatGPT Analyst] Received debuggerCapture request:', request.conversationId);
+    
     attachDebuggerAndCapture(sender.tab.id, request.conversationId);
-    sendResponse({success:true});
+    sendResponse({success: true, message: 'Debugger capture initiated'});
     return true;
   }
 }); 
