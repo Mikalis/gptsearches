@@ -93,6 +93,13 @@
   color: #ff6b6b;
 }
 
+.refresh-btn:hover {
+  background: rgba(129, 199, 132, 0.2);
+  border-color: #81c784;
+  color: #81c784;
+  transform: scale(1.05) rotate(180deg);
+}
+
 /* Content area */
 .overlay-content {
   max-height: 500px;

@@ -45,6 +45,13 @@ function createOverlay() {
   const controls = document.createElement('div');
   controls.className = 'overlay-controls';
   
+  // Refresh button
+  const refreshBtn = document.createElement('button');
+  refreshBtn.className = 'control-btn refresh-btn';
+  refreshBtn.innerHTML = '🔄';
+  refreshBtn.title = 'Refresh Analysis';
+  refreshBtn.addEventListener('click', handleRefreshClick);
+  
   // Minimize button
   const minimizeBtn = document.createElement('button');
   minimizeBtn.className = 'control-btn minimize-btn';
@@ -59,6 +66,7 @@ function createOverlay() {
   closeBtn.title = 'Close';
   closeBtn.addEventListener('click', hideOverlay);
   
+  controls.appendChild(refreshBtn);
   controls.appendChild(minimizeBtn);
   controls.appendChild(closeBtn);
   
@@ -323,7 +331,7 @@ function createWelcomeMessage() {
         </ol>
       </div>
       <div class="action-buttons">
-        <button class="primary-btn" onclick="window.location.reload()">
+        <button class="primary-btn" data-action="refresh-page">
           🔄 Refresh Page
         </button>
       </div>
@@ -343,7 +351,7 @@ function createSearchQueriesSection(queries) {
       <li class="query-item">
         <span class="query-number">${index + 1}</span>
         <span class="query-text">${escapeHtml(query)}</span>
-        <button class="copy-btn" onclick="copyToClipboard('${escapeHtml(query)}')">📋</button>
+        <button class="copy-btn" data-action="copy-text" data-text="${escapeHtml(query)}">📋</button>
       </li>
     `;
   });
@@ -452,7 +460,7 @@ function createUserContextSection(userContext) {
 function createExportSection() {
   return `
     <div class="export-section">
-      <button class="export-btn" onclick="exportAnalysisData()">
+      <button class="export-btn" data-action="export-data">
         📥 Export Analysis Data
       </button>
     </div>
@@ -497,16 +505,77 @@ function createErrorMessage(error) {
       <h4>⚠️ Analysis Error</h4>
       <p>Error: ${escapeHtml(error)}</p>
       <div class="error-actions">
-        <button class="retry-btn" onclick="displayAnalysisData()">🔄 Retry</button>
-        <button class="new-conversation-btn" onclick="window.location.reload()">🆕 Refresh</button>
+        <button class="retry-btn" data-action="retry-analysis">🔄 Retry</button>
+        <button class="new-conversation-btn" data-action="refresh-page">🆕 Refresh</button>
       </div>
     </div>
   `;
 }
 
 function setupEventListeners() {
-  // Copy button listeners are handled inline with onclick
-  console.log('✅ Event listeners setup complete');
+  const contentDiv = document.getElementById('overlay-content');
+  if (!contentDiv) return;
+  
+  // Remove any existing listeners to prevent duplicates
+  contentDiv.removeEventListener('click', handleContentClick);
+  
+  // Add single event listener for all buttons using event delegation
+  contentDiv.addEventListener('click', handleContentClick);
+  
+  console.log('✅ Event delegation setup complete');
+}
+
+function handleContentClick(event) {
+  const target = event.target;
+  const action = target.getAttribute('data-action');
+  
+  if (!action) return;
+  
+  event.preventDefault();
+  event.stopPropagation();
+  
+  console.log('🖱️ Button clicked:', action);
+  
+  switch (action) {
+    case 'copy-text':
+      const textToCopy = target.getAttribute('data-text');
+      if (textToCopy) {
+        // Add visual feedback
+        const originalText = target.innerHTML;
+        target.innerHTML = '✅';
+        target.style.background = 'rgba(129, 199, 132, 0.3)';
+        target.style.borderColor = '#81c784';
+        
+        copyToClipboard(textToCopy);
+        
+        // Reset button after 1 second
+        setTimeout(() => {
+          target.innerHTML = originalText;
+          target.style.background = '';
+          target.style.borderColor = '';
+        }, 1000);
+      }
+      break;
+      
+    case 'export-data':
+      exportAnalysisData();
+      break;
+      
+    case 'retry-analysis':
+      displayAnalysisData();
+      break;
+      
+    case 'refresh-page':
+      showNotification('🔄 Refreshing page...');
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+      break;
+      
+    default:
+      console.warn('❓ Unknown action:', action);
+      break;
+  }
 }
 
 // Utility functions
@@ -518,11 +587,34 @@ function escapeHtml(text) {
 
 async function copyToClipboard(text) {
   try {
+    if (!text || text.trim() === '') {
+      showNotification('❌ Nothing to copy');
+      return;
+    }
+    
     await navigator.clipboard.writeText(text);
-    showNotification('📋 Copied to clipboard!');
+    showNotification(`📋 Copied: "${text.length > 30 ? text.substring(0, 30) + '...' : text}"`);
+    console.log('✅ Copied to clipboard:', text);
   } catch (error) {
-    console.error('Failed to copy:', error);
-    showNotification('❌ Copy failed');
+    console.error('❌ Failed to copy:', error);
+    
+    // Fallback: try using the old-fashioned way
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      
+      showNotification('📋 Copied to clipboard (fallback)!');
+      console.log('✅ Copied using fallback method:', text);
+    } catch (fallbackError) {
+      console.error('❌ Fallback copy also failed:', fallbackError);
+      showNotification('❌ Copy failed - please select and copy manually');
+    }
   }
 }
 
@@ -594,6 +686,31 @@ function showNotification(message) {
   }, 3000);
 }
 
+function handleRefreshClick() {
+  showNotification('🔄 Refreshing analysis data...');
+  console.log('🔄 Manual refresh triggered');
+  
+  // Clear current data and reload
+  chrome.storage.local.remove(['analysisData'], () => {
+    displayAnalysisData();
+    
+    // Try to trigger a new analysis after a short delay
+    setTimeout(() => {
+      chrome.storage.local.get(['conversationData'], (result) => {
+        if (result.conversationData) {
+          const analysis = extractSearchAndReasoning(result.conversationData);
+          chrome.storage.local.set({ analysisData: analysis }, () => {
+            displayAnalysisData();
+            showNotification('✅ Analysis refreshed!');
+          });
+        } else {
+          showNotification('ℹ️ No conversation data found');
+        }
+      });
+    }, 500);
+  });
+}
+
 function toggleOverlay() {
   if (!overlay) return;
   
@@ -620,6 +737,28 @@ function hideOverlay() {
   }
 }
 
+// Debug function for troubleshooting
+window.debugChatGPTAnalyst = function() {
+  console.log('🔍 ChatGPT Analyst Debug Information:');
+  console.log('Overlay exists:', !!overlay);
+  console.log('Overlay visible:', overlayVisible);
+  
+  chrome.storage.local.get(null, (items) => {
+    console.log('Local storage items:', Object.keys(items));
+    console.log('Conversation data exists:', !!items.conversationData);
+    console.log('Analysis data exists:', !!items.analysisData);
+    
+    if (items.analysisData) {
+      console.log('Analysis data summary:', {
+        searchQueries: items.analysisData.searchQueries?.length || 0,
+        thoughts: items.analysisData.thoughts?.length || 0,
+        sources: items.analysisData.sources?.length || 0,
+        reasoning: items.analysisData.reasoning?.length || 0
+      });
+    }
+  });
+};
+
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   // Ctrl/Cmd + Shift + A to toggle overlay
@@ -631,6 +770,13 @@ document.addEventListener('keydown', (e) => {
       initializeOverlay();
     }
   }
+  
+  // Ctrl/Cmd + Shift + D for debug info
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'D') {
+    e.preventDefault();
+    window.debugChatGPTAnalyst();
+  }
 });
 
-console.log('✅ ChatGPT Analyst enhanced content script initialized'); 
+console.log('✅ ChatGPT Analyst enhanced content script initialized');
+console.log('💡 Debug shortcut: Ctrl/Cmd + Shift + D'); 
