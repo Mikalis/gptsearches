@@ -90,50 +90,68 @@ function interceptAnyConversationResponse(responseUrl, method) {
   let foundData = false;
   let originalMethods = {};
   
-  // Method 1: Intercept Response.prototype.json() for fetch responses
-  originalMethods.responseJson = Response.prototype.json;
-  Response.prototype.json = function() {
-    const result = originalMethods.responseJson.call(this);
-    const url = this.url;
-    
-    if (url && url.includes('/backend-api/conversation/') && 
-        url.includes(conversationId) && !foundData) {
-      
-      console.log('[ChatGPT Analyst] 🎉 Intercepted Response.json() for:', url);
-      
-      result.then(data => {
-        if (isConversationData(data, conversationId)) {
-          foundData = true;
-          console.log('[ChatGPT Analyst] ✅ Successfully captured conversation data via Response.json!', {
-            url: url,
-            dataSize: JSON.stringify(data).length,
-            hasMapping: !!data.mapping,
-            mappingKeys: data.mapping ? Object.keys(data.mapping).length : 0,
-            title: data.title
-          });
-          
-          // Send success data
-          window.postMessage({
-            type: 'CHATGPT_CONVERSATION_DATA',
-            data: data,
-            conversationId: conversationId,
-            url: url,
-            timestamp: Date.now(),
-            success: true
-          }, '*');
-          
-          // Restore original methods
-          restoreOriginalMethods();
-        } else {
-          console.log('[ChatGPT Analyst] Response data does not match conversation criteria');
-        }
-      }).catch(e => {
-        console.log('[ChatGPT Analyst] JSON parsing failed:', e);
-      });
-    }
-    
-    return result;
-  };
+     // Method 1: Intercept Response.prototype.json() for fetch responses
+   originalMethods.responseJson = Response.prototype.json;
+   Response.prototype.json = function() {
+     const result = originalMethods.responseJson.call(this);
+     const url = this.url;
+     
+     if (url && url.includes('/backend-api/conversation/') && 
+         url.includes(conversationId) && !foundData) {
+       
+       console.log('[ChatGPT Analyst] 🎉 Intercepted Response.json() for:', url);
+       
+       result.then(data => {
+         console.log('[ChatGPT Analyst] 📊 Analyzing response data:', {
+           url: url,
+           hasData: !!data,
+           dataType: typeof data,
+           isArray: Array.isArray(data),
+           keys: data && typeof data === 'object' ? Object.keys(data) : [],
+           hasMapping: !!(data && data.mapping),
+           hasDetail: !!(data && data.detail),
+           conversationId: data && data.conversation_id ? data.conversation_id : 'not found'
+         });
+         
+         if (isConversationData(data, conversationId)) {
+           foundData = true;
+           console.log('[ChatGPT Analyst] ✅ Successfully captured conversation data via Response.json!', {
+             url: url,
+             dataSize: JSON.stringify(data).length,
+             hasMapping: !!data.mapping,
+             mappingKeys: data.mapping ? Object.keys(data.mapping).length : 0,
+             title: data.title
+           });
+           
+           // Send success data
+           window.postMessage({
+             type: 'CHATGPT_CONVERSATION_DATA',
+             data: data,
+             conversationId: conversationId,
+             url: url,
+             timestamp: Date.now(),
+             success: true
+           }, '*');
+           
+           // Restore original methods
+           restoreOriginalMethods();
+         } else {
+           console.log('[ChatGPT Analyst] Response data does not match conversation criteria');
+           
+           // Check if this is an error response
+           if (data && data.detail && data.detail.code) {
+             console.log('[ChatGPT Analyst] Found error response:', data.detail);
+             foundData = true; // Prevent timeout
+             restoreOriginalMethods();
+           }
+         }
+       }).catch(e => {
+         console.log('[ChatGPT Analyst] JSON parsing failed:', e);
+       });
+     }
+     
+     return result;
+   };
   
   // Method 2: Intercept XMLHttpRequest for legacy API calls
   originalMethods.xhrOpen = XMLHttpRequest.prototype.open;

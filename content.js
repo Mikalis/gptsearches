@@ -370,9 +370,18 @@ function exportAnalysisData(analysisData) {
 
 // Show/hide overlay functions
 function showOverlay() {
-  if (!overlayElement) createOverlay();
-  overlayElement.style.display = 'block';
-  overlayVisible = true;
+  console.log('[ChatGPT Analyst] showOverlay called, overlayElement exists:', !!overlayElement);
+  if (!overlayElement) {
+    console.log('[ChatGPT Analyst] Creating overlay in showOverlay...');
+    createOverlay();
+  }
+  if (overlayElement) {
+    overlayElement.style.display = 'block';
+    overlayVisible = true;
+    console.log('[ChatGPT Analyst] Overlay displayed successfully');
+  } else {
+    console.error('[ChatGPT Analyst] Cannot show overlay - overlayElement is still null after creation');
+  }
 }
 
 function hideOverlay() {
@@ -480,6 +489,7 @@ window.addEventListener('message', (event) => {
       let isConversationNotFound = event.data.error.includes('Conversation not found') || 
                                   event.data.error.includes('conversation_not_found');
       
+      console.log('[ChatGPT Analyst] Showing error result in overlay...');
       showAnalysisResult({
         hasData: false,
         searchQueries: [],
@@ -760,17 +770,29 @@ function extractSearchAndReasoning(data) {
   return result;
 }
 
-// Show analysis results in overlay
-function showAnalysisResult(analysisData) {
-  // Create overlay if it doesn't exist
-  if (!overlayElement) {
-    createOverlay();
-  }
-  
-  const contentDiv = document.getElementById(CONFIG.contentId);
-  const statusDiv = overlayElement.querySelector('.overlay-status');
-  
-  if (!contentDiv) return;
+  // Show analysis results in overlay
+  function showAnalysisResult(analysisData) {
+    console.log('[ChatGPT Analyst] showAnalysisResult called with:', {
+      hasData: analysisData.hasData,
+      error: analysisData.error,
+      isLoading: analysisData.isLoading,
+      isReloading: analysisData.isReloading,
+      overlayExists: !!overlayElement
+    });
+    
+    // Create overlay if it doesn't exist
+    if (!overlayElement) {
+      console.log('[ChatGPT Analyst] Creating overlay...');
+      createOverlay();
+    }
+    
+    const contentDiv = document.getElementById(CONFIG.contentId);
+    const statusDiv = overlayElement.querySelector('.overlay-status');
+    
+    if (!contentDiv) {
+      console.error('[ChatGPT Analyst] Content div not found!');
+      return;
+    }
   
   // Clear existing content
   contentDiv.innerHTML = '';
