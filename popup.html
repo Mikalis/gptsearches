@@ -5,143 +5,323 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ChatGPT Analyst</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            width: 320px;
+        * {
             margin: 0;
             padding: 0;
-            background-color: #f9f9f9;
-            color: #333;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            width: 380px;
+            min-height: 500px;
+            background: linear-gradient(145deg, #1a1a2e, #16213e);
+            color: #e8eaed;
+            overflow: hidden;
         }
         
         .container {
-            padding: 16px;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         
+        /* Header */
         .header {
             display: flex;
             align-items: center;
-            margin-bottom: 16px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid #eaeaea;
+            padding: 20px 24px;
+            background: linear-gradient(90deg, #0f3460, #1a1a2e);
+            border-bottom: 1px solid #0f3460;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at 50% 50%, rgba(79, 195, 247, 0.1), transparent 70%);
+            pointer-events: none;
         }
         
         .logo {
-            width: 32px;
-            height: 32px;
-            margin-right: 12px;
+            width: 40px;
+            height: 40px;
+            margin-right: 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
+            position: relative;
+            z-index: 1;
+        }
+        
+        .title-container {
+            flex-grow: 1;
+            position: relative;
+            z-index: 1;
         }
         
         .title {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 600;
             margin: 0;
-            flex-grow: 1;
+            color: #4fc3f7;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
         }
         
-        .button {
-            background-color: #10a37f;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 8px 16px;
+        .subtitle {
+            font-size: 12px;
+            color: rgba(232, 234, 237, 0.7);
+            margin-top: 2px;
+        }
+        
+        /* Main content */
+        .main-content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(79, 195, 247, 0.3) transparent;
+        }
+        
+        .main-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .main-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .main-content::-webkit-scrollbar-thumb {
+            background: rgba(79, 195, 247, 0.3);
+            border-radius: 3px;
+        }
+        
+        /* Status indicator */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            background: rgba(79, 195, 247, 0.08);
+            border: 1px solid rgba(79, 195, 247, 0.2);
+            border-radius: 12px;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #81c784;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.2); }
+        }
+        
+        .status-text {
             font-size: 14px;
             font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            width: 100%;
-            margin-bottom: 12px;
+            color: #e8eaed;
         }
         
-        .button:hover {
-            background-color: #0d8a6c;
-        }
-        
-        .button.secondary {
-            background-color: #e9e9e9;
-            color: #333;
-        }
-        
-        .button.secondary:hover {
-            background-color: #d9d9d9;
-        }
-        
-        .tips-container {
-            background-color: #f0f7ff;
-            border-radius: 6px;
-            padding: 12px;
-            margin-bottom: 16px;
-            border-left: 4px solid #0066cc;
-        }
-        
-        .tips-header {
+        /* Action buttons */
+        .action-buttons {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-            cursor: pointer;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 24px;
         }
         
-        .tips-header h3 {
-            margin: 0;
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 12px;
             font-size: 14px;
-            color: #0066cc;
-        }
-        
-        .tips-content {
-            display: none;
-            font-size: 13px;
-            line-height: 1.4;
-        }
-        
-        .tips-content.visible {
-            display: block;
-        }
-        
-        .tips-content ul {
-            margin: 8px 0;
-            padding-left: 20px;
-        }
-        
-        .tips-content li {
-            margin-bottom: 6px;
-        }
-        
-        .settings-toggle {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
+            font-weight: 600;
             cursor: pointer;
-            border-top: 1px solid #eaeaea;
-            margin-top: 12px;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            position: relative;
+            overflow: hidden;
         }
         
-        .settings-container {
-            display: none;
-            padding-top: 12px;
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.5s ease;
         }
         
-        .settings-container.visible {
-            display: block;
+        .btn:hover::before {
+            left: 100%;
         }
         
+        .btn-primary {
+            background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+            color: white;
+            box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #29b6f6, #0288d1);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(79, 195, 247, 0.4);
+        }
+        
+        .btn-secondary {
+            background: rgba(232, 234, 237, 0.1);
+            color: #e8eaed;
+            border: 1px solid rgba(232, 234, 237, 0.2);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(232, 234, 237, 0.15);
+            border-color: rgba(232, 234, 237, 0.3);
+            transform: translateY(-1px);
+        }
+        
+        /* Expandable sections */
+        .expandable-section {
+            margin-bottom: 20px;
+            background: rgba(26, 26, 46, 0.5);
+            border: 1px solid rgba(15, 52, 96, 0.3);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .expandable-section:hover {
+            border-color: rgba(79, 195, 247, 0.4);
+        }
+        
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+        
+        .section-header:hover {
+            background: rgba(79, 195, 247, 0.05);
+        }
+        
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #4fc3f7;
+        }
+        
+        .section-icon {
+            font-size: 16px;
+        }
+        
+        .expand-icon {
+            font-size: 14px;
+            color: rgba(232, 234, 237, 0.6);
+            transition: transform 0.3s ease;
+        }
+        
+        .section-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        
+        .section-content.expanded {
+            max-height: 300px;
+        }
+        
+        .section-content.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+        
+        .section-inner {
+            padding: 0 20px 20px 20px;
+        }
+        
+        /* Tips content */
+        .tips-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .tips-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 12px;
+            padding: 12px;
+            background: rgba(79, 195, 247, 0.05);
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: rgba(232, 234, 237, 0.9);
+        }
+        
+        .tips-list li::before {
+            content: '💡';
+            font-size: 14px;
+            margin-top: 1px;
+        }
+        
+        /* Settings */
         .setting-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding: 12px;
+            background: rgba(79, 195, 247, 0.05);
+            border-radius: 8px;
             margin-bottom: 12px;
+            transition: all 0.2s ease;
+        }
+        
+        .setting-row:hover {
+            background: rgba(79, 195, 247, 0.08);
         }
         
         .setting-label {
             font-size: 14px;
+            color: #e8eaed;
+            font-weight: 500;
         }
         
+        .setting-description {
+            font-size: 12px;
+            color: rgba(232, 234, 237, 0.6);
+            margin-top: 2px;
+        }
+        
+        /* Toggle switch */
         .toggle-switch {
             position: relative;
             display: inline-block;
-            width: 40px;
-            height: 20px;
+            width: 44px;
+            height: 24px;
         }
         
         .toggle-switch input {
@@ -157,87 +337,234 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 20px;
+            background: rgba(232, 234, 237, 0.3);
+            transition: all 0.3s ease;
+            border-radius: 24px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
         }
         
         .toggle-slider:before {
             position: absolute;
             content: "";
-            height: 16px;
-            width: 16px;
+            height: 20px;
+            width: 20px;
             left: 2px;
             bottom: 2px;
-            background-color: white;
-            transition: .4s;
+            background: white;
+            transition: all 0.3s ease;
             border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
         
         input:checked + .toggle-slider {
-            background-color: #10a37f;
+            background: linear-gradient(135deg, #4fc3f7, #29b6f6);
+            box-shadow: 0 2px 8px rgba(79, 195, 247, 0.4);
         }
         
         input:checked + .toggle-slider:before {
             transform: translateX(20px);
         }
         
+        /* Footer */
+        .footer {
+            padding: 16px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-top: 1px solid rgba(15, 52, 96, 0.3);
+            text-align: center;
+        }
+        
         .version {
             font-size: 11px;
-            color: #999;
+            color: rgba(232, 234, 237, 0.5);
+            margin-bottom: 8px;
+        }
+        
+        .developer-link {
+            color: #4fc3f7;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+        
+        .developer-link:hover {
+            color: #29b6f6;
+            text-decoration: underline;
+        }
+        
+        /* Stats section */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            padding: 16px;
+            background: rgba(79, 195, 247, 0.08);
+            border: 1px solid rgba(79, 195, 247, 0.2);
+            border-radius: 12px;
             text-align: center;
-            margin-top: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            background: rgba(79, 195, 247, 0.12);
+            transform: translateY(-2px);
+        }
+        
+        .stat-number {
+            font-size: 24px;
+            font-weight: 700;
+            color: #4fc3f7;
+            line-height: 1;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: rgba(232, 234, 237, 0.7);
+            margin-top: 4px;
+        }
+        
+        /* Animations */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .container {
+            animation: slideIn 0.4s ease-out;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-height: 600px) {
+            .main-content {
+                padding: 16px;
+            }
+            
+            .header {
+                padding: 16px 20px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <img src="icons/icon48.png" alt="ChatGPT Analyst Logo" class="logo">
-            <h1 class="title">ChatGPT Analyst</h1>
-        </div>
-        
-        <div class="tips-container">
-            <div class="tips-header" id="tips-header">
-                <h3>Quick Tips</h3>
-                <span class="toggle-icon">▼</span>
-            </div>
-            <div class="tips-content" id="tips-content">
-                <ul>
-                    <li>Ask ChatGPT questions that require research or web searches</li>
-                    <li>Click "Analyze Conversation" to extract search queries</li>
-                    <li>For best results, wait for ChatGPT to finish its response</li>
-                    <li>Start a new conversation if you don't see any results</li>
-                </ul>
+            <img src="icons/icon48.png" alt="ChatGPT Analyst" class="logo">
+            <div class="title-container">
+                <h1 class="title">ChatGPT Analyst</h1>
+                <div class="subtitle">Advanced conversation analysis</div>
             </div>
         </div>
         
-        <button id="analyze-btn" class="button">Analyze Conversation</button>
-        <button id="new-conversation-btn" class="button secondary">Start New Conversation</button>
-        
-        <div class="settings-toggle" id="settings-toggle">
-            <span>Settings</span>
-            <span class="toggle-icon">▼</span>
+        <div class="main-content">
+            <div class="status-indicator" id="status-indicator">
+                <div class="status-dot"></div>
+                <div class="status-text">Ready to analyze conversations</div>
+            </div>
+            
+            <div class="stats-grid" id="stats-grid" style="display: none;">
+                <div class="stat-card">
+                    <div class="stat-number" id="queries-count">0</div>
+                    <div class="stat-label">Search Queries</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="thoughts-count">0</div>
+                    <div class="stat-label">Thoughts Found</div>
+                </div>
+            </div>
+            
+            <div class="action-buttons">
+                <button id="analyze-btn" class="btn btn-primary">
+                    <span class="section-icon">🔍</span>
+                    Analyze Conversation
+                </button>
+                <button id="new-conversation-btn" class="btn btn-secondary">
+                    <span class="section-icon">✨</span>
+                    Start New Conversation
+                </button>
+            </div>
+            
+            <div class="expandable-section">
+                <div class="section-header" id="tips-header">
+                    <div class="section-title">
+                        <span class="section-icon">💡</span>
+                        Quick Tips
+                    </div>
+                    <span class="expand-icon">▼</span>
+                </div>
+                <div class="section-content" id="tips-content">
+                    <div class="section-inner">
+                        <ul class="tips-list">
+                            <li>Ask ChatGPT questions that require research or web searches</li>
+                            <li>Click "Analyze Conversation" to extract search queries and reasoning</li>
+                            <li>For best results, wait for ChatGPT to finish its complete response</li>
+                            <li>Start a new conversation if you don't see any results after a search</li>
+                            <li>The plugin works automatically - just browse normally on ChatGPT</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="expandable-section">
+                <div class="section-header" id="settings-header">
+                    <div class="section-title">
+                        <span class="section-icon">⚙️</span>
+                        Settings
+                    </div>
+                    <span class="expand-icon">▼</span>
+                </div>
+                <div class="section-content" id="settings-content">
+                    <div class="section-inner">
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Auto-analyze conversations</div>
+                                <div class="setting-description">Automatically capture data from new conversations</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="auto-analyze" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Show debug information</div>
+                                <div class="setting-description">Display technical details for troubleshooting</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="show-debug">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="setting-row">
+                            <div>
+                                <div class="setting-label">Real-time updates</div>
+                                <div class="setting-description">Update analysis as conversation progresses</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="realtime-updates" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         
-        <div class="settings-container" id="settings-container">
-            <div class="setting-row">
-                <span class="setting-label">Auto-analyze new conversations</span>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="auto-analyze">
-                    <span class="toggle-slider"></span>
-                </label>
-            </div>
-            <div class="setting-row">
-                <span class="setting-label">Show debug information</span>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="show-debug">
-                    <span class="toggle-slider"></span>
-                </label>
-            </div>
+        <div class="footer">
+            <div class="version">Version 1.0.0</div>
+            <a href="https://github.com" class="developer-link" target="_blank" rel="noopener">
+                Made with ❤️ for ChatGPT analysis
+            </a>
         </div>
-        
-        <div class="version">Version 1.0.0</div>
     </div>
     
     <script src="popup.js"></script>
