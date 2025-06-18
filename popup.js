@@ -493,7 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Thoughts
     if (analysis.thoughts.length > 0) {
-      const thoughtTexts = analysis.thoughts.map(t => `${t.summary}: ${t.content.substring(0, 100)}...`);
+      const thoughtTexts = analysis.thoughts.map(t => `${t.summary}: ${t.content}`);
       html += createResultSection('🧠', 'ChatGPT Thoughts', thoughtTexts, 'thought');
     }
     
@@ -505,7 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Reasoning
     if (analysis.reasoning.length > 0) {
-      const reasoningTexts = analysis.reasoning.map(r => r.content.substring(0, 100) + '...');
+      const reasoningTexts = analysis.reasoning.map(r => r.content);
       html += createResultSection('⚡', 'Reasoning Process', reasoningTexts, 'reasoning');
     }
     
@@ -542,10 +542,9 @@ document.addEventListener('DOMContentLoaded', () => {
     html += '<div class="results-list">';
     
     items.forEach(item => {
-      const displayText = item.length > 80 ? item.substring(0, 80) + '...' : item;
       html += `
         <div class="result-item">
-          ${escapeHtml(displayText)}
+          ${escapeHtml(item)}
           <button class="result-copy-btn" data-text="${escapeHtml(item)}" title="Copy">📋</button>
         </div>
       `;
