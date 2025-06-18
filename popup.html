@@ -535,6 +535,41 @@
             transform: translateY(-1px);
         }
         
+        /* Promotional banner */
+        .promo-banner {
+            margin: 20px 24px 16px 24px;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, rgba(79, 195, 247, 0.1), rgba(79, 195, 247, 0.05));
+            border: 1px solid rgba(79, 195, 247, 0.2);
+            border-radius: 10px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .promo-banner:hover {
+            background: linear-gradient(135deg, rgba(79, 195, 247, 0.15), rgba(79, 195, 247, 0.08));
+            transform: translateY(-1px);
+        }
+        
+        .promo-text {
+            font-size: 12px;
+            color: rgba(232, 234, 237, 0.8);
+            line-height: 1.4;
+            margin: 0;
+        }
+        
+        .promo-link {
+            color: #4fc3f7;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s ease;
+        }
+        
+        .promo-link:hover {
+            color: #29b6f6;
+            text-decoration: underline;
+        }
+        
         /* Responsive adjustments */
         @media (max-height: 600px) {
             .main-content {
@@ -655,6 +690,14 @@
                     </div>
                 </div>
             </div>
+        </div>
+        
+        <!-- Promotional Banner -->
+        <div class="promo-banner">
+            <p class="promo-text">
+                Want to be better visible in ChatGPT? Talk to our experts at 
+                <a href="https://www.unic.com" class="promo-link" target="_blank" rel="noopener">www.unic.com</a>
+            </p>
         </div>
         
         <div class="footer">
